@@ -1,0 +1,217 @@
+:root {
+  --bg: #f7f7f4;
+  --surface: #ffffff;
+  --text: #1c1f1e;
+  --muted: #5d6662;
+  --border: #d9ddd9;
+  --accent: #0f766e;
+  --accent-text: #ffffff;
+  --notice-bg: #fff6db;
+  --notice-text: #6b4e00;
+  --error: #b42318;
+  --origin: #334155;
+  --destination: #b42318;
+  --candidate: #0f766e;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121514;
+    --surface: #1b1f1e;
+    --text: #e8ebe9;
+    --muted: #9aa49f;
+    --border: #2e3432;
+    --accent: #2dd4bf;
+    --accent-text: #042f2b;
+    --notice-bg: #3a2f0b;
+    --notice-text: #f5d27a;
+    --error: #f97066;
+    --origin: #cbd5e1;
+    --destination: #f97066;
+    --candidate: #2dd4bf;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+a {
+  color: var(--accent);
+}
+
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.app-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.trip-form {
+  display: grid;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.trip-form label {
+  display: grid;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.hint {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.trip-form input {
+  font: inherit;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  min-width: 0;
+}
+
+.trip-form input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+.trip-form button {
+  font: inherit;
+  font-weight: 600;
+  padding: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.trip-form button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.notice {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--notice-bg);
+  color: var(--notice-text);
+  font-size: 0.875rem;
+}
+
+.error {
+  color: var(--error);
+  margin: 0;
+}
+
+.options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.option button {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+}
+
+.option.selected button {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.option-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 600;
+}
+
+.option-total {
+  white-space: nowrap;
+}
+
+.option-split,
+.option-times {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.map {
+  height: 360px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.marker {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.marker-origin {
+  background: var(--origin);
+}
+
+.marker-destination {
+  background: var(--destination);
+  width: 18px;
+  height: 18px;
+}
+
+.marker-candidate {
+  background: var(--candidate);
+  opacity: 0.6;
+}
+
+.marker-candidate.selected {
+  opacity: 1;
+  width: 18px;
+  height: 18px;
+}
+
+.attribution {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
