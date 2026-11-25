@@ -209,6 +209,7 @@ stage "Workers KV: create the namespace"
 say "This key-value store will later hold your personal data (home Origin, Curated"
 say "Parking Candidates) behind the login. It is never committed to the repo."
 open_url "https://dash.cloudflare.com/?to=/:account/workers/kv/namespaces"
+note "Already created a 'zbear' namespace on an earlier run? Keep it and skip this stage."
 step "Pick your account if asked, then select 'Create instance'."
 step "Name it: zbear"
 step "Select 'Create'."
@@ -223,14 +224,20 @@ step "Project name: zbear   ·   Production branch: main"
 step "Framework preset: None"
 step "Build command: npm run build   ·   Build output directory: dist"
 note "Node 22 comes from the repo's .node-version file; no variable needed."
+warn "Wrong turn check: if you see 'Import a repository', a 'Deploy command' field, or the address will end in .workers.dev, you are creating a Worker, not a Pages project. Go back and pick Pages. (A Worker with only static assets cannot use the KV binding.)"
 step "Select 'Save and Deploy' and wait for the first deployment to finish."
 say ""
 say "When it's done, Cloudflare shows the site address (e.g. zbear.pages.dev;"
 say "it gets a suffix if 'zbear' was taken)."
 ZBEAR_PAGES_HOST=""
-while [[ -z "$ZBEAR_PAGES_HOST" ]]; do
+while [[ "$ZBEAR_PAGES_HOST" != *.pages.dev ]]; do
   ask ZBEAR_PAGES_HOST "Paste the host, without https:// (e.g. zbear.pages.dev):"
   ZBEAR_PAGES_HOST="${ZBEAR_PAGES_HOST#http*://}"; ZBEAR_PAGES_HOST="${ZBEAR_PAGES_HOST%%/*}"
+  if [[ "$ZBEAR_PAGES_HOST" == *.workers.dev ]]; then
+    warn "That's a Worker address: delete that Worker (its Settings → Delete) and create a Pages project as above."
+  elif [[ "$ZBEAR_PAGES_HOST" != *.pages.dev ]]; then
+    warn "Expected an address ending in .pages.dev."
+  fi
 done
 write_env ZBEAR_PAGES_HOST "$ZBEAR_PAGES_HOST"
 warn "Until stage 5 the site is public. Nothing personal is in it yet."
