@@ -1,0 +1,3 @@
+# Restriction Windows ignore holidays and suspensions
+
+ZBE ordinances lift restrictions on public holidays ("dies laborables"), and ZBEs are sometimes suspended (Barcelona, 22 Jan – 16 Mar 2026). ZBEar deliberately ignores both, and treats every Restriction Window as applying on every weekday it names. A ZBE can span several municipalities with different local holidays, and suspensions are announced ad hoc, so a wrong "unrestricted" answer costs a fine, while a wrong "restricted" answer costs only an unneeded park-and-ride. Don't "fix" this by adding a holiday calendar without revisiting that trade-off.
