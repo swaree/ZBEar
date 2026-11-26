@@ -1,6 +1,6 @@
 import type { RoutingEngine, TrafficDrive, TransitDuration } from "../routing/RoutingEngine";
 import { distanceM } from "./geo";
-import { DEFAULT_TIME_TO_FIND_SPACE_S } from "./parking";
+import { DEFAULT_TIME_TO_FIND_SPACE_S, judgeParking } from "./parking";
 import type { Baseline, DirectDrive, Option, OptionReturnLeg, ParkingCandidate, Recommendation, Remark, TripRequest } from "./types";
 import { isDriveIllegal, isInsideAnyZbe, nextRestriction, zbesDrivenThrough, type Zbe } from "./zbe";
 
@@ -55,7 +55,10 @@ export async function recommend(
     .filter(({ candidate, detour }) => detour <= maxDetourRatio && !isInsideAnyZbe(candidate.location, datasets.zbes))
     .sort((a, b) => a.detour - b.detour)
     .slice(0, maxRoutedCandidates)
-    .map(({ candidate }) => candidate);
+    .map(({ candidate }): RoutedCandidate => ({
+      ...candidate,
+      timeToFindSpaceS: candidate.timeToFindSpaceS ?? DEFAULT_TIME_TO_FIND_SPACE_S[candidate.kind],
+    }));
   const locations = candidates.map((c) => c.location);
   const leaveDestinationAt = returnStartsAt(trip);
   // The Origin rides along in the candidates' transit calls: that gives the Baseline for free.
@@ -142,6 +145,10 @@ export async function recommend(
       };
     }
     const doorToDoorS = outboundS + (returnLeg ? returnLeg.transitS + returnLeg.driveS : 0);
+    const arriveParkingAt = leaveOriginAt + driveThere.durationS * 1000;
+    // With no return, the car stays at least until the traveller reaches the Destination.
+    const driveAwayAt = returnLeg ? returnLeg.driveFromParkingAt.getTime() : atArrival;
+    const parking = judgeParking(candidate, { from: arriveParkingAt, until: driveAwayAt, openEnded: !returnLeg });
     options.push({
       candidate,
       driveS: driveThere.durationS,
@@ -153,10 +160,13 @@ export async function recommend(
       leaveOriginAt: new Date(leaveOriginAt),
       leaveParkingAt: new Date(atArrival - transitThere.durationS * 1000),
       returnLeg,
+      parkingConflicts: parking.conflicts,
+      remarks: parking.remarks,
     });
   }
 
-  options.sort((x, y) => x.doorToDoorS - y.doorToDoorS);
+  // Two tiers: Options whose Parking Conditions conflict with the stay go below all the others.
+  options.sort((x, y) => tierOf(x) - tierOf(y) || x.doorToDoorS - y.doorToDoorS);
   const [directDriveThere, directDriveBack] = await directDrives;
   const directDrive = directDriveOf(
     trip,
@@ -167,6 +177,8 @@ export async function recommend(
   );
   return { options: options.slice(0, MAX_OPTIONS), directDrive, baseline };
 }
+
+const tierOf = (option: Option) => (option.parkingConflicts.length > 0 ? 1 : 0);
 
 /** Parking at the Destination is unknown, so Direct Drive takes as long to find a space as on the street. */
 const DIRECT_DRIVE_TIME_TO_FIND_SPACE_S = DEFAULT_TIME_TO_FIND_SPACE_S.street;
@@ -228,9 +240,12 @@ function timeSavedAgainst(baseline: Baseline | null, doorToDoorS: number): numbe
   return baseline ? baseline.transitS + (baseline.returnLeg?.transitS ?? 0) - doorToDoorS : null;
 }
 
+/** A Parking Candidate being routed, with its time to find a space settled. */
+type RoutedCandidate = ParkingCandidate & { timeToFindSpaceS: number };
+
 /** A Parking Candidate's free-flow door-to-door time, both ways when the Trip has a Return Leg. */
 interface FirstPassEntry {
-  candidate: ParkingCandidate;
+  candidate: RoutedCandidate;
   transitThere: TransitDuration;
   outboundS: number;
   /** Null when the Trip has no Return Leg. */

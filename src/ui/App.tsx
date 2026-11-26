@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
 import { recommend, returnStartsAt } from "../domain/recommend";
 import type {
   Baseline,
   DirectDrive,
   LatLng,
+  LeaveOutsideRestrictionRemark,
   Option,
   ParkingCandidate,
+  ParkingConditionName,
+  ParkingConflict,
   Recommendation,
   Remark,
   TripRequest,
@@ -256,13 +259,20 @@ export function App() {
             </p>
           ) : (
             <ol className="options">
-              {planned.recommendation.options.map((o) => (
-                <OptionCard
-                  key={o.candidate.id}
-                  option={o}
-                  selected={o.candidate.id === selected}
-                  onSelect={() => setSelected(o.candidate.id)}
-                />
+              {planned.recommendation.options.map((o, i, all) => (
+                <Fragment key={o.candidate.id}>
+                  {o.parkingConflicts.length > 0 && !all[i - 1]?.parkingConflicts.length && (
+                    <li className="tier-divider">
+                      {i === 0 ? "Every Option's" : "Below, the"} Parking Conditions conflict with your stay
+                    </li>
+                  )}
+                  <OptionCard
+                    option={o}
+                    arrival={planned.trip.arriveBy}
+                    selected={o.candidate.id === selected}
+                    onSelect={() => setSelected(o.candidate.id)}
+                  />
+                </Fragment>
               ))}
             </ol>
           )}
@@ -313,9 +323,20 @@ export function App() {
   );
 }
 
-function OptionCard({ option, selected, onSelect }: { option: Option; selected: boolean; onSelect: () => void }) {
+function OptionCard({
+  option,
+  arrival,
+  selected,
+  onSelect,
+}: {
+  option: Option;
+  arrival: Date;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const conflicting = option.parkingConflicts.length > 0;
   return (
-    <li className={selected ? "option selected" : "option"}>
+    <li className={["option", selected && "selected", conflicting && "conflicting"].filter(Boolean).join(" ")}>
       <button type="button" onClick={onSelect}>
         <div className="option-head">
           <span className="option-name">{option.candidate.name}</span>
@@ -343,10 +364,37 @@ function OptionCard({ option, selected, onSelect }: { option: Option; selected: 
             </div>
           </>
         )}
+        {conflicting && (
+          <p className="notice conflict">
+            Conflicts with your stay: {option.parkingConflicts.map((c) => conflictText(c, arrival)).join("; ")}.
+          </p>
+        )}
+        {option.remarks.map((remark) => (
+          <p key={remark.kind} className="notice">
+            {remarkText(remark, arrival)}
+          </p>
+        ))}
       </button>
     </li>
   );
 }
+
+function conflictText(conflict: ParkingConflict, arrival: Date): string {
+  switch (conflict.kind) {
+    case "max-stay-exceeded":
+      return `stays longer than the maximum ${minutes(conflict.maxStayS)}`;
+    case "resident-only":
+      return "residents only";
+    case "closed-during-stay":
+      return `closed from ${dayClock(conflict.closedFrom, arrival)}`;
+  }
+}
+
+const CONDITION_NAMES: Record<ParkingConditionName, string> = {
+  "max-stay": "maximum stay",
+  access: "who may park",
+  "opening-hours": "opening hours",
+};
 
 function DirectDriveCard({ directDrive, trip }: { directDrive: DirectDrive; trip: TripRequest }) {
   const back = directDrive.returnLeg;
@@ -379,6 +427,24 @@ function DirectDriveCard({ directDrive, trip }: { directDrive: DirectDrive; trip
 }
 
 function remarkText(remark: Remark, arrival: Date): string {
+  switch (remark.kind) {
+    case "leave-outside-restriction":
+      return leaveOutsideRestrictionText(remark, arrival);
+    case "parking-conditions-unverified":
+      return `Parking Conditions unverified: ${listed(remark.unknown.map((name) => CONDITION_NAMES[name]))} unknown.`;
+    case "leave-parking-by":
+      return `Leave the parking by ${dayClock(remark.leaveBy, arrival)}, ${
+        remark.because === "max-stay" ? "when the maximum stay runs out" : "when it closes"
+      }.`;
+  }
+}
+
+/** "a", "a and b", "a, b and c". */
+function listed(items: string[]): string {
+  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
+function leaveOutsideRestrictionText(remark: LeaveOutsideRestrictionRemark, arrival: Date): string {
   const zbes = remark.zbeNames.join(", ");
   const outBy = remark.restrictedFrom > arrival ? `are out of ${zbes} by ${dayClock(remark.restrictedFrom, arrival)}` : null;
   const leaveAfter = remark.restrictedUntil && `leave after ${dayClock(remark.restrictedUntil, arrival)}`;

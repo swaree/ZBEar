@@ -69,7 +69,7 @@ A stretch of streets around a transit stop outside every ZBE where street parkin
 _Avoid_: parking area, zone, suggestion
 
 **Option**:
-One Parking Candidate evaluated for a specific Trip, with its door-to-door time and Remarks. Options are ranked by door-to-door time.
+One Parking Candidate evaluated for a specific Trip, with its door-to-door time and Remarks. Options are ranked by door-to-door time, in two tiers: those whose known Parking Conditions conflict with the car's stay at the Parking Candidate (from arriving to driving away) go below all the others. Unknown Parking Conditions never conflict; they leave the Option unverified.
 _Avoid_: result, route, plan
 
 **Direct Drive**:

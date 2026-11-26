@@ -140,6 +140,31 @@ describe("Discovered Parking Candidates build", () => {
     expect(dataset.candidates.map((c) => c.conditions)).toEqual([{ access: "residents" }]);
   });
 
+  it("keeps open access as a known Parking Condition, so it isn't mistaken for unknown", () => {
+    const osm = {
+      elements: [busStop(1, STATION.lat, STATION.lon), carParkWay(10, STATION.lat, STATION.lon, { access: "yes" })],
+    };
+
+    const { dataset } = buildParkingCandidates({ osm, zbes: [], builtAt });
+
+    expect(dataset.candidates.map((c) => c.conditions)).toEqual([{ access: "yes" }]);
+  });
+
+  it("keeps a maximum stay that applies only at some hours, beside the one at all hours", () => {
+    const osm = {
+      elements: [
+        busStop(1, STATION.lat, STATION.lon),
+        carParkWay(10, STATION.lat, STATION.lon, { maxstay: "4 hours", "maxstay:conditional": "2 hours @ (Mo-Fr 08:00-20:00)" }),
+      ],
+    };
+
+    const { dataset } = buildParkingCandidates({ osm, zbes: [], builtAt });
+
+    expect(dataset.candidates.map((c) => c.conditions)).toEqual([
+      { maxStay: "4 hours", maxStayConditional: "2 hours @ (Mo-Fr 08:00-20:00)" },
+    ]);
+  });
+
   it("tells P+R and street parking from other car parks", () => {
     const tagSets: Record<string, string>[] = [
       { park_ride: "yes" },

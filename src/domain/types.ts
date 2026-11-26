@@ -17,11 +17,13 @@ export interface ParkingConditions {
   fee?: string;
   /** OSM `charge`, e.g. "2.50 EUR/hour". */
   charge?: string;
-  /** OSM `maxstay`, e.g. "2 hours". */
+  /** OSM `maxstay`, at all hours: e.g. "2 hours", or "no". */
   maxStay?: string;
-  /** OSM `access` when it restricts who may park, e.g. "residents". */
+  /** OSM `maxstay:conditional`, a maximum stay at some hours only: e.g. "2 hours @ (Mo-Fr 08:00-20:00)". */
+  maxStayConditional?: string;
+  /** OSM `access`, e.g. "yes" or "residents". */
   access?: string;
-  /** OSM `opening_hours`. */
+  /** OSM `opening_hours`, e.g. "Mo-Fr 07:00-22:00". Street parking without one never closes. */
   openingHours?: string;
 }
 
@@ -49,7 +51,8 @@ export interface ParkingCandidate {
   location: LatLng;
   kind: ParkingKind;
   conditions: ParkingConditions;
-  timeToFindSpaceS: number;
+  /** As set by the user; until then, the default for its kind. */
+  timeToFindSpaceS?: number;
 }
 
 export interface TripRequest {
@@ -86,7 +89,26 @@ export interface Option {
   leaveParkingAt: Date;
   /** Null when the Trip has no return. */
   returnLeg: OptionReturnLeg | null;
+  /**
+   * How the Parking Conditions known for the candidate conflict with the stay, from arriving at the
+   * candidate to driving away. An Option with any is ranked below every Option with none.
+   */
+  parkingConflicts: ParkingConflict[];
+  /** Notable facts about the Option that the score leaves out. */
+  remarks: Remark[];
 }
+
+/** The Parking Conditions that can conflict with a stay, and so leave an Option unverified while unknown. */
+export type ParkingConditionName = "max-stay" | "access" | "opening-hours";
+
+/** A way that a Parking Candidate's known Parking Conditions conflict with the car's stay there. */
+export type ParkingConflict =
+  /** The car stays longer than this maximum stay allows, counted during the hours it applies. */
+  | { kind: "max-stay-exceeded"; maxStayS: number }
+  /** Only residents may park there. */
+  | { kind: "resident-only" }
+  /** The car park is closed during the stay, from this moment, so the car could be locked in, or out. */
+  | { kind: "closed-during-stay"; closedFrom: Date };
 
 /** An Option's way back: transit from the Destination to the parking, then the drive to the Origin. */
 export interface OptionReturnLeg {
@@ -125,7 +147,23 @@ export interface DirectDrive {
 }
 
 /** A notable fact about an Option that the score leaves out. */
-export type Remark = LeaveOutsideRestrictionRemark;
+export type Remark = LeaveOutsideRestrictionRemark | ParkingConditionsUnverifiedRemark | LeaveParkingByRemark;
+
+/**
+ * With no return given, whether the stay outlasts the parking's maximum stay or opening hours can't be
+ * judged: the car must leave the parking by this time, when the first of them runs out.
+ */
+export interface LeaveParkingByRemark {
+  kind: "leave-parking-by";
+  leaveBy: Date;
+  because: "max-stay" | "closing";
+}
+
+/** Some Parking Conditions that could conflict with the stay are unknown, so the Option may be compromised. */
+export interface ParkingConditionsUnverifiedRemark {
+  kind: "parking-conditions-unverified";
+  unknown: ParkingConditionName[];
+}
 
 /**
  * With no return given, Direct Drive is valid only if the car leaves the Destination outside the next

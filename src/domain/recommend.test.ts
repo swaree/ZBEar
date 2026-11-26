@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { recommend } from "./recommend";
-import type { LatLng, ParkingCandidate } from "./types";
+import { recommend, returnStartsAt } from "./recommend";
+import type { LatLng, ParkingCandidate, TripRequest } from "./types";
 import type { EnvironmentalLabel, Zbe } from "./zbe";
 import { fakeRoutingEngine } from "../routing/fakeRoutingEngine";
 import type { TrafficDrive, TransitDuration } from "../routing/RoutingEngine";
@@ -1154,5 +1154,271 @@ describe("recommend: Direct Drive", () => {
 
       expect(recommendation.directDrive?.remarks).toEqual([]);
     });
+  });
+});
+
+describe("recommend: Parking Conditions", () => {
+  const sixPm = new Date("2026-12-01T18:00:00+01:00");
+  /** The usual Trip (Tuesday, due at 09:00), back from the Destination at 18:00. */
+  const roundTrip = { ...trip, return: { getBackAt: sixPm } };
+
+  /** Conditions under which nothing about the parking is unknown, and nothing conflicts with any stay. */
+  const allKnownAndFine = { maxStay: "no", access: "yes", openingHours: "24/7" };
+
+  function withConditions(c: ParkingCandidate, conditions: ParkingCandidate["conditions"]): ParkingCandidate {
+    return { ...c, conditions };
+  }
+
+  /**
+   * Round-trip routing where `fast` beats `slow` by 20 min each way. With a 3 min time to find a space,
+   * the car reaches `fast` at 08:27 and leaves it at 18:30: a stay of just over 10 hours.
+   */
+  function fastAndSlow(fast: ParkingCandidate, slow: ParkingCandidate, plannedTrip: TripRequest = roundTrip) {
+    const leaveDestinationAt = returnStartsAt(plannedTrip) ?? undefined;
+    return fakeRoutingEngine({
+      ...plannedTrip,
+      leaveDestinationAt,
+      driveFromOrigin: [
+        [fast.location, min(20)],
+        [slow.location, min(30)],
+      ],
+      transitToDestination: [
+        [fast.location, { durationS: min(30), transfers: 0 }],
+        [slow.location, { durationS: min(40), transfers: 0 }],
+      ],
+      ...(leaveDestinationAt && {
+        transitFromDestination: [
+          [fast.location, { durationS: min(30), transfers: 0 }],
+          [slow.location, { durationS: min(40), transfers: 0 }],
+        ] as [LatLng, TransitDuration][],
+        driveToOrigin: [
+          [fast.location, min(20)],
+          [slow.location, min(30)],
+        ] as [LatLng, number][],
+      }),
+    });
+  }
+
+  it("ranks an Option whose maximum stay is shorter than the stay below every other, without hiding it", async () => {
+    const fast = withConditions(candidate("fast", 41.41, 3), { ...allKnownAndFine, maxStay: "2 hours" });
+    const slow = withConditions(candidate("slow", 41.42, 3), allKnownAndFine);
+
+    const recommendation = await recommend(roundTrip, [fast, slow], noZbes, fastAndSlow(fast, slow));
+
+    expect(recommendation.options.map((o) => [o.candidate.id, o.parkingConflicts])).toEqual([
+      ["slow", []],
+      ["fast", [{ kind: "max-stay-exceeded", maxStayS: min(120) }]],
+    ]);
+  });
+
+  it("ranks a resident-only Parking Candidate below every other", async () => {
+    const fast = withConditions(candidate("fast", 41.41, 3), { ...allKnownAndFine, access: "residents" });
+    const slow = withConditions(candidate("slow", 41.42, 3), allKnownAndFine);
+
+    const recommendation = await recommend(roundTrip, [fast, slow], noZbes, fastAndSlow(fast, slow));
+
+    expect(recommendation.options.map((o) => [o.candidate.id, o.parkingConflicts])).toEqual([
+      ["slow", []],
+      ["fast", [{ kind: "resident-only" }]],
+    ]);
+  });
+
+  it("ranks a car park that is closed during part of the stay below every other", async () => {
+    // Weekdays until 17:00, while the car stays until 18:30; the slow one stays open until 20:00.
+    const fast = withConditions(candidate("fast", 41.41, 3), { ...allKnownAndFine, openingHours: "Mo-Fr 07:00-17:00" });
+    const slow = withConditions(candidate("slow", 41.42, 3), { ...allKnownAndFine, openingHours: "Mo-Fr 07:00-20:00" });
+
+    const recommendation = await recommend(roundTrip, [fast, slow], noZbes, fastAndSlow(fast, slow));
+
+    expect(recommendation.options.map((o) => [o.candidate.id, o.parkingConflicts])).toEqual([
+      ["slow", []],
+      ["fast", [{ kind: "closed-during-stay", closedFrom: new Date("2026-12-01T17:00:00+01:00") }]],
+    ]);
+  });
+
+  it("ranks a Parking Candidate whose conditions are unknown as if nothing conflicts, flagged unverified", async () => {
+    const unknown = withConditions(candidate("unknown", 41.41, 3), {});
+    const known = withConditions(candidate("known", 41.42, 3), allKnownAndFine);
+
+    const recommendation = await recommend(roundTrip, [unknown, known], noZbes, fastAndSlow(unknown, known));
+
+    expect(recommendation.options.map((o) => [o.candidate.id, o.parkingConflicts, o.remarks])).toEqual([
+      ["unknown", [], [{ kind: "parking-conditions-unverified", unknown: ["max-stay", "access", "opening-hours"] }]],
+      ["known", [], []],
+    ]);
+  });
+
+  /** How the one Option at `fast` (by default a stay on Tuesday from 08:27 to 18:30) reads its Parking Conditions. */
+  async function verdictOn(
+    conditions: ParkingCandidate["conditions"],
+    kind: ParkingCandidate["kind"] = "car-park",
+    plannedTrip: TripRequest = roundTrip,
+  ) {
+    const fast = { ...withConditions(candidate("fast", 41.41, 3), conditions), kind };
+    const slow = candidate("slow", 41.42, 3);
+    const [option] = (await recommend(plannedTrip, [fast], noZbes, fastAndSlow(fast, slow, plannedTrip))).options;
+    if (option?.parkingConflicts.length) return "conflict";
+    const unverified = option?.remarks.find((r) => r.kind === "parking-conditions-unverified");
+    return unverified ? `unknown ${unverified.unknown.join(", ")}` : "fine";
+  }
+
+  it.each([
+    ["2 hours", "conflict"],
+    ["1 hour", "conflict"],
+    ["90 minutes", "conflict"],
+    ["1.5 hours", "conflict"],
+    ["45 min", "conflict"],
+    ["12 hours", "fine"],
+    ["24 hours", "fine"],
+    ["1 day", "fine"],
+    ["no", "fine"],
+    ["unlimited", "fine"],
+    // A bare number has no unit, and "0" is as likely "no limit" as a mistake.
+    ["60", "unknown max-stay"],
+    ["0", "unknown max-stay"],
+    ["No es controla", "unknown max-stay"],
+    ["2 Hours", "conflict"],
+  ])("reads a maximum stay of %j as %s", async (maxStay, verdict) => {
+    expect(await verdictOn({ ...allKnownAndFine, maxStay })).toBe(verdict);
+  });
+
+  it.each([
+    // Only the regulated hours count: 08:27–10:00 is 1 h 33 min.
+    ["no", "2 hours @ (Mo-Fr 08:00-10:00)", "fine"],
+    ["no", "1 hour @ (Mo-Fr 08:00-10:00)", "conflict"],
+    ["no", "1 hour @ (Sa,Su 08:00-20:00)", "fine"],
+    // A break in the regulated hours doesn't start the count again: 1 h 3 min + 2 h.
+    ["no", "2 hours @ (Mo-Fr 08:00-09:30,16:00-18:00)", "conflict"],
+    [undefined, "2 hours @ (Mo-Fr 08:00-10:00)", "fine"],
+    [undefined, "1 hour @ (Mo-Fr 08:00-10:00)", "conflict"],
+    // Both limits are judged, each in its own hours.
+    ["4 hours", "2 hours @ (Mo-Fr 08:00-10:00)", "conflict"],
+    ["12 hours", "1 hour @ (Mo-Fr 08:00-10:00)", "conflict"],
+    ["no", "2 hours @ (Jun-Sep 08:00-20:00)", "unknown max-stay"],
+  ])("reads a maximum stay of %j, and %j at some hours, as %s", async (maxStay, maxStayConditional, verdict) => {
+    expect(await verdictOn({ ...allKnownAndFine, maxStay, maxStayConditional })).toBe(verdict);
+  });
+
+  it("counts a maximum stay at some hours afresh each day", async () => {
+    // Back from the Destination on Wednesday at 10:00, so the car stays from Tuesday 08:27 to Wednesday 10:30:
+    // 3 h 33 min regulated on Tuesday and 2 h on Wednesday, each within 4 hours.
+    const nextMorning = { ...trip, return: { getBackAt: new Date("2026-12-02T10:00:00+01:00") } };
+    const conditions = { ...allKnownAndFine, maxStayConditional: "4 hours @ (Mo-Fr 08:00-10:00,18:00-20:00)" };
+
+    expect(await verdictOn(conditions, "car-park", nextMorning)).toBe("fine");
+  });
+
+  it.each([
+    ["residents", "conflict"],
+    ["yes", "fine"],
+    ["public", "fine"],
+    ["permissive", "fine"],
+    ["destination", "fine"],
+    ["psv", "unknown access"],
+    ["Residents", "conflict"],
+  ])("reads access %j as %s", async (access, verdict) => {
+    expect(await verdictOn({ ...allKnownAndFine, access })).toBe(verdict);
+  });
+
+  it.each([
+    ["24/7", "fine"],
+    ["Mo-Su 08:00-20:00", "fine"],
+    ["08:00-20:00", "fine"],
+    ["Mo-Fr 07:00-01:00; Sa 08:00-01:00; Su 09:00-01:00", "fine"],
+    // With no holiday calendar, hours that differ on public holidays can't be relied on (ADR-0003).
+    ["Mo-Fr 05:00-23:00; PH off", "unknown opening-hours"],
+    ["Mo-Fr 07:00-17:00; PH off", "conflict"],
+    ["Mo-Su 08:30-20:00", "conflict"],
+    ["Mo-Fr 09:00-13:00,16:00-20:00", "conflict"],
+    ["Sa,Su 08:00-20:00", "conflict"],
+    ["Mo-We off; Th-Su 00:00-24:00", "conflict"],
+    // A later rule replaces an earlier one on the days it names.
+    ["24/7; Tu 00:00-12:00", "conflict"],
+    // Monday's hours run past midnight into Tuesday, covering the arrival at 08:27 or not.
+    ["Mo 12:00-09:00; Tu 09:00-20:00", "fine"],
+    ["Mo 12:00-08:00; Tu 09:00-20:00", "conflict"],
+    ["Jun-Sep: Mo-Su 10:00-20:00", "unknown opening-hours"],
+    ["Mo-Su 20:00 07:00", "unknown opening-hours"],
+  ])("reads opening hours %j as %s", async (openingHours, verdict) => {
+    expect(await verdictOn({ ...allKnownAndFine, openingHours })).toBe(verdict);
+  });
+
+  describe("with no return", () => {
+    // The car reaches `fast` at 08:27 and stays at least until the traveller reaches the Destination at 09:00.
+    async function fastOnly(conditions: ParkingCandidate["conditions"]) {
+      const fast = withConditions(candidate("fast", 41.41, 3), conditions);
+      const slow = candidate("slow", 41.42, 3);
+      const [option] = (await recommend(trip, [fast], noZbes, fastAndSlow(fast, slow, trip))).options;
+      return option;
+    }
+
+    it("gives a Remark to leave the parking before the maximum stay runs out, rather than a conflict", async () => {
+      const option = await fastOnly({ ...allKnownAndFine, maxStay: "2 hours" });
+
+      expect(option?.parkingConflicts).toEqual([]);
+      expect(option?.remarks).toEqual([
+        { kind: "leave-parking-by", leaveBy: new Date("2026-12-01T10:27:00+01:00"), because: "max-stay" },
+      ]);
+    });
+
+    it("gives a Remark to leave the parking before it closes", async () => {
+      const option = await fastOnly({ ...allKnownAndFine, openingHours: "Mo-Fr 07:00-17:00" });
+
+      expect(option?.parkingConflicts).toEqual([]);
+      expect(option?.remarks).toEqual([
+        { kind: "leave-parking-by", leaveBy: new Date("2026-12-01T17:00:00+01:00"), because: "closing" },
+      ]);
+    });
+
+    it("names whichever runs out first, the maximum stay or the opening hours", async () => {
+      const option = await fastOnly({ ...allKnownAndFine, maxStay: "12 hours", openingHours: "Mo-Fr 07:00-17:00" });
+
+      expect(option?.remarks).toEqual([
+        { kind: "leave-parking-by", leaveBy: new Date("2026-12-01T17:00:00+01:00"), because: "closing" },
+      ]);
+    });
+
+    it("still finds a conflict when the car must stay longer than allowed just for the traveller to reach the Destination", async () => {
+      // Closed until 08:30, and 15 minutes at most: the car arrives at 08:27 and stays until 09:00 at least.
+      expect((await fastOnly({ ...allKnownAndFine, openingHours: "Mo-Su 08:30-20:00" }))?.parkingConflicts).toEqual([
+        { kind: "closed-during-stay", closedFrom: new Date("2026-12-01T08:27:00+01:00") },
+      ]);
+      expect((await fastOnly({ ...allKnownAndFine, maxStay: "15 minutes" }))?.parkingConflicts).toEqual([
+        { kind: "max-stay-exceeded", maxStayS: min(15) },
+      ]);
+    });
+
+    it("needs no Remark when neither the maximum stay nor the opening hours run out", async () => {
+      expect((await fastOnly(allKnownAndFine))?.remarks).toEqual([]);
+    });
+  });
+
+  it("takes as long to find a space as the candidate's kind suggests, unless one is set", async () => {
+    const kinds = ["car-park", "park-and-ride", "street"] as const;
+    const unset = kinds.map((kind, i) => {
+      const { timeToFindSpaceS: _, ...rest } = candidate(kind, 41.41 + i / 100, 0);
+      return { ...rest, kind };
+    });
+    const set = { ...candidate("set", 41.44, 7), kind: "street" as const };
+    const all = [...unset, set];
+    const engine = fakeRoutingEngine({
+      ...trip,
+      driveFromOrigin: all.map((c) => [c.location, min(20)]),
+      transitToDestination: all.map((c) => [c.location, { durationS: min(30), transfers: 0 }]),
+    });
+
+    const recommendation = await recommend(trip, all, noZbes, engine);
+
+    expect(Object.fromEntries(recommendation.options.map((o) => [o.candidate.id, o.timeToFindSpaceS / 60]))).toEqual({
+      "car-park": 3,
+      "park-and-ride": 3,
+      street: 10,
+      set: 7,
+    });
+  });
+
+  it("knows that street parking never closes, though no opening hours are given", async () => {
+    expect(await verdictOn({ maxStay: "no", access: "yes" }, "street")).toBe("fine");
+    expect(await verdictOn({ maxStay: "no", access: "yes" }, "car-park")).toBe("unknown opening-hours");
   });
 });

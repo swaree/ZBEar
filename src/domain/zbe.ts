@@ -1,12 +1,12 @@
+import { localTimeOf, minuteOfDayOf, MINUTE_MS, wholeMinutesWithin, type LocalTime, type Weekday } from "./localTime";
 import type { LatLng } from "./types";
+
+export type { Weekday };
 
 /** The DGT classification of a vehicle that a ZBE uses to decide who is barred. */
 export type EnvironmentalLabel = "none" | "B" | "C" | "ECO" | "0";
 
 export const ENVIRONMENTAL_LABELS: readonly EnvironmentalLabel[] = ["none", "B", "C", "ECO", "0"];
-
-/** ISO weekday: 1 = Monday … 7 = Sunday. */
-export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 /**
  * The recurring time span during which a ZBE bars a vehicle, in local Europe/Madrid time.
@@ -332,43 +332,20 @@ function boxOf(positions: [number, number][]): Box {
 const inBox = (b: Box, x: number, y: number) => x >= b.minX && x <= b.maxX && y >= b.minY && y <= b.maxY;
 const boxesOverlap = (a: Box, b: Box) => a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY;
 
-const MINUTE_MS = 60_000;
-
 /**
- * Restriction Windows start and end on whole minutes of local time, and Europe/Madrid is a whole number of
- * hours off UTC, so a stretch overlaps a window exactly when the window holds its start or one of the
- * whole minutes within it.
+ * Restriction Windows start and end on whole minutes of local time, so a stretch overlaps a window exactly
+ * when the window holds its start or one of the whole minutes within it.
  */
 function overlapsRestrictionWindow({ from, to }: Stretch, window: RestrictionWindow): boolean {
-  if (isInRestrictionWindow(from, window)) return true;
-  for (let at = Math.ceil(from / MINUTE_MS) * MINUTE_MS; at <= to; at += MINUTE_MS) {
+  if (isInRestrictionWindow(from, window) || isInRestrictionWindow(to, window)) return true;
+  for (const at of wholeMinutesWithin(from, to)) {
     if (isInRestrictionWindow(at, window)) return true;
   }
   return false;
 }
 
-const MADRID_TIME = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/Madrid",
-  weekday: "short",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-});
-const WEEKDAYS: Record<string, Weekday> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
-
-/** A moment in local Europe/Madrid time: its weekday and its "HH:MM". */
-interface LocalTime {
-  weekday: Weekday | undefined;
-  time: string;
-}
-
-function localTimeOf(at: number): LocalTime {
-  const parts = Object.fromEntries(MADRID_TIME.formatToParts(at).map((p) => [p.type, p.value]));
-  return { weekday: WEEKDAYS[parts.weekday ?? ""], time: `${parts.hour}:${parts.minute}` };
-}
-
-function isInWindow({ weekday, time }: LocalTime, { weekdays, start, end }: RestrictionWindow): boolean {
-  return weekday != null && weekdays.includes(weekday) && start <= time && time < end;
+function isInWindow({ weekday, minuteOfDay }: LocalTime, { weekdays, start, end }: RestrictionWindow): boolean {
+  return weekdays.includes(weekday) && minuteOfDayOf(start) <= minuteOfDay && minuteOfDay < minuteOfDayOf(end);
 }
 
 function isInRestrictionWindow(at: number, window: RestrictionWindow): boolean {

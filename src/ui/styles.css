@@ -189,6 +189,27 @@ a {
   box-shadow: 0 0 0 1px var(--accent);
 }
 
+.option .notice {
+  margin-top: 4px;
+}
+
+.option.conflicting button {
+  border-style: dashed;
+}
+
+.notice.conflict {
+  background: transparent;
+  color: var(--error);
+  padding: 0;
+}
+
+.tier-divider {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
 .direct-drive {
   background: var(--surface);
   border: 1px solid var(--accent);

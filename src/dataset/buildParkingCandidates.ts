@@ -22,7 +22,6 @@ const MERGE_DISTANCE_M = 150;
  * among them: it's a Parking Condition, and such a car park is still worth listing.
  */
 const PRIVATE_ACCESS = new Set(["private", "customers", "permit", "no", "delivery", "employees"]);
-const OPEN_ACCESS = new Set(["yes", "public", "permissive", "destination"]);
 
 /**
  * Where a bus, tram, metro or train picks passengers up, however OSM tags it: any of these
@@ -147,8 +146,9 @@ function conditionsOf(tags: Record<string, string>): ParkingConditions {
   if (tags.fee) conditions.fee = tags.fee;
   if (tags.charge) conditions.charge = tags.charge;
   if (tags.maxstay) conditions.maxStay = tags.maxstay;
+  if (tags["maxstay:conditional"]) conditions.maxStayConditional = tags["maxstay:conditional"];
   if (tags.opening_hours) conditions.openingHours = tags.opening_hours;
-  // Anyone may park at "yes", "public", "permissive" or "destination"; anything else is a rule worth knowing.
-  if (tags.access && !OPEN_ACCESS.has(tags.access)) conditions.access = tags.access;
+  // Kept even when anyone may park: a missing access is unknown, not open.
+  if (tags.access) conditions.access = tags.access;
   return conditions;
 }
