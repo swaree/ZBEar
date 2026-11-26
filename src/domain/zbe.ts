@@ -36,8 +36,20 @@ export interface Zbe {
    * inside the ZBE, so doubt resolves on the safe side. Absent when there are none.
    */
   disputedAreas?: MultiPolygon;
+  /**
+   * The centrelines of the roads that run within the perimeter but are legally outside the ZBE
+   * (e.g. the Rondes, B-10/B-20, and their ramps that don't lead only into the ZBE). Driving along
+   * one is not driving inside the ZBE. Absent when there are none.
+   */
+  exemptCorridors?: MultiLineString;
   restrictionWindow: RestrictionWindow;
   barredLabels: EnvironmentalLabel[];
+}
+
+/** A GeoJSON MultiLineString: lines of [lng, lat] positions. */
+export interface MultiLineString {
+  type: "MultiLineString";
+  coordinates: [number, number][][];
 }
 
 /** The published ZBE dataset. */
@@ -101,8 +113,25 @@ interface Box {
 }
 
 /**
- * The spans of time the car is inside the ZBE (its perimeter or its disputed areas). Each path segment is
- * split where it crosses a ZBE edge, so a segment that cuts a corner counts even with both ends outside.
+ * How far a drive may run from an Exempt Corridor's centreline and still be on it, in m. It absorbs the
+ * few metres by which the routing provider's road geometry sits off OSM's, while a Ronda lateral (a city
+ * street ~15–25 m beside the main carriageway) mostly stays outside it.
+ */
+export const EXEMPT_CORRIDOR_TOLERANCE_M = 12;
+
+/** Whether a point lies on one of the ZBE's Exempt Corridors, within the tolerance of its centreline. */
+export function isOnExemptCorridor(point: LatLng, zbe: Zbe): boolean {
+  return !!zbe.exemptCorridors && corridorIndexOf(zbe.exemptCorridors).covers(point.lng, point.lat);
+}
+
+/** Inside a ZBE, the drive is checked against its Exempt Corridors at points this far apart, in m. */
+const CORRIDOR_SAMPLE_STEP_M = EXEMPT_CORRIDOR_TOLERANCE_M / 2;
+
+/**
+ * The spans of time the car is inside the ZBE (its perimeter or its disputed areas) and not on one of its
+ * Exempt Corridors. Each path segment is split where it crosses a ZBE edge, so a segment that cuts a
+ * corner counts even with both ends outside. Inside, a step counts as on a corridor when both its ends
+ * are, so leaving a corridor for a street inside the ZBE counts from where the drive leaves it.
  */
 function stretchesInside(path: TimedPosition[], zbe: Zbe): Stretch[] {
   const polygons = areasOf(zbe).map((rings) => ({
@@ -112,6 +141,7 @@ function stretchesInside(path: TimedPosition[], zbe: Zbe): Stretch[] {
   const zbeBox = boxOf(polygons.flatMap(({ box }) => [[box.minX, box.minY], [box.maxX, box.maxY]] as [number, number][]));
   const inside = (x: number, y: number) =>
     polygons.some((p) => inBox(p.box, x, y) && isInsidePolygon(x, y, p.rings));
+  const corridors = zbe.exemptCorridors && corridorIndexOf(zbe.exemptCorridors);
 
   const stretches: Stretch[] = [];
   let open: Stretch | null = null;
@@ -123,7 +153,7 @@ function stretchesInside(path: TimedPosition[], zbe: Zbe): Stretch[] {
 
   if (path.length === 1) {
     const [only] = path as [TimedPosition];
-    piece(inside(only.lng, only.lat), only.at, only.at);
+    piece(inside(only.lng, only.lat) && !corridors?.covers(only.lng, only.lat), only.at, only.at);
   }
   for (let i = 0; i + 1 < path.length; i++) {
     const p = path[i]!;
@@ -147,17 +177,100 @@ function stretchesInside(path: TimedPosition[], zbe: Zbe): Stretch[] {
       }
     }
     cuts.sort((a, b) => a - b);
+    const x = (t: number) => p.lng + t * (q.lng - p.lng);
+    const y = (t: number) => p.lat + t * (q.lat - p.lat);
+    const at = (t: number) => p.at + t * (q.at - p.at);
     for (let k = 0; k + 1 < cuts.length; k++) {
       const [t0, t1] = [cuts[k]!, cuts[k + 1]!];
       const mid = (t0 + t1) / 2;
-      piece(
-        inside(p.lng + mid * (q.lng - p.lng), p.lat + mid * (q.lat - p.lat)),
-        p.at + t0 * (q.at - p.at),
-        p.at + t1 * (q.at - p.at),
-      );
+      const isInside = inside(x(mid), y(mid));
+      if (!isInside || !corridors || !corridors.isNear(segmentBox)) {
+        piece(isInside, at(t0), at(t1));
+        continue;
+      }
+      const steps = Math.max(1, Math.ceil(lengthM(x(t0), y(t0), x(t1), y(t1)) / CORRIDOR_SAMPLE_STEP_M));
+      let from = t0;
+      let wasOn = corridors.covers(x(from), y(from));
+      for (let s = 1; s <= steps; s++) {
+        const to = t0 + ((t1 - t0) * s) / steps;
+        const isOn = corridors.covers(x(to), y(to));
+        piece(!(wasOn && isOn), at(from), at(to));
+        [from, wasOn] = [to, isOn];
+      }
     }
   }
   return stretches;
+}
+
+const METRES_PER_DEGREE = 111_320;
+
+/** Metres east and north of (x0, y0) to (x, y), flattened around y0's latitude: accurate at city scale. */
+function offsetM(x0: number, y0: number, x: number, y: number): [number, number] {
+  return [(x - x0) * METRES_PER_DEGREE * Math.cos((y0 * Math.PI) / 180), (y - y0) * METRES_PER_DEGREE];
+}
+
+const lengthM = (x0: number, y0: number, x1: number, y1: number) => Math.hypot(...offsetM(x0, y0, x1, y1));
+
+/** Exempt Corridor segments bucketed in a grid, to find those near a point without scanning them all. */
+interface CorridorIndex {
+  /** Whether the point lies within the tolerance of some corridor. */
+  covers(x: number, y: number): boolean;
+  /** Whether any corridor comes within the tolerance of the box. */
+  isNear(box: Box): boolean;
+}
+
+/** Grid cells of about 110 m by 80 m in Catalonia: a few cover a long motorway segment. */
+const CELL_DEG = 0.001;
+const corridorIndexes = new WeakMap<MultiLineString, CorridorIndex>();
+
+function corridorIndexOf(corridors: MultiLineString): CorridorIndex {
+  const known = corridorIndexes.get(corridors);
+  if (known) return known;
+  type Segment = [[number, number], [number, number]];
+  const cells = new Map<string, Segment[]>();
+  const cell = (col: number, row: number) => `${col}:${row}`;
+  const all: [number, number][] = [];
+  for (const line of corridors.coordinates) {
+    for (let i = 0; i + 1 < line.length; i++) {
+      const segment: Segment = [line[i]!, line[i + 1]!];
+      const box = withMargin(boxOf(segment));
+      all.push([box.minX, box.minY], [box.maxX, box.maxY]);
+      for (let col = Math.floor(box.minX / CELL_DEG); col <= Math.floor(box.maxX / CELL_DEG); col++) {
+        for (let row = Math.floor(box.minY / CELL_DEG); row <= Math.floor(box.maxY / CELL_DEG); row++) {
+          const key = cell(col, row);
+          const bucket = cells.get(key);
+          if (bucket) bucket.push(segment);
+          else cells.set(key, [segment]);
+        }
+      }
+    }
+  }
+  const reach = all.length > 0 ? boxOf(all) : null;
+  const index: CorridorIndex = {
+    covers(x, y) {
+      const bucket = cells.get(cell(Math.floor(x / CELL_DEG), Math.floor(y / CELL_DEG)));
+      return !!bucket && bucket.some(([a, b]) => distanceToSegmentM(x, y, a, b) <= EXEMPT_CORRIDOR_TOLERANCE_M);
+    },
+    isNear: (box) => !!reach && boxesOverlap(reach, box),
+  };
+  corridorIndexes.set(corridors, index);
+  return index;
+}
+
+/** The box grown by the tolerance on every side (generously in longitude, which is the shorter degree). */
+function withMargin(box: Box): Box {
+  const marginLat = EXEMPT_CORRIDOR_TOLERANCE_M / METRES_PER_DEGREE;
+  const marginLng = marginLat / Math.cos((Math.max(Math.abs(box.minY), Math.abs(box.maxY)) * Math.PI) / 180);
+  return { minX: box.minX - marginLng, minY: box.minY - marginLat, maxX: box.maxX + marginLng, maxY: box.maxY + marginLat };
+}
+
+function distanceToSegmentM(x: number, y: number, a: [number, number], b: [number, number]): number {
+  const [ax, ay] = offsetM(x, y, a[0], a[1]);
+  const [bx, by] = offsetM(x, y, b[0], b[1]);
+  const [dx, dy] = [bx - ax, by - ay];
+  const lengthSquared = dx * dx + dy * dy;
+  const t = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / lengthSquared));
+  return Math.hypot(ax + t * dx, ay + t * dy);
 }
 
 /** Where along p→q (0..1) it crosses the edge a→b, if it does. */

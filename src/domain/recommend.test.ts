@@ -558,3 +558,81 @@ describe("recommend: drives through ZBEs", () => {
     expect(await plan("0")).toEqual(["through-strict", "through-west"]);
   });
 });
+
+describe("recommend: Exempt Corridors", () => {
+  /** West of the Origin, away from every straight drive to the candidates (which all lie east of it). */
+  const westZbe = squareZbe("west", { lat: 41.5, lng: 1.8, side: 0.02 });
+  /** A road like the Rondes, running north to south right through the west ZBE along longitude 1.81. */
+  const corridor: [number, number][] = [
+    [1.81, 41.53],
+    [1.81, 41.49],
+  ];
+  const withCorridor: Zbe = { ...westZbe, exemptCorridors: { type: "MultiLineString", coordinates: [corridor] } };
+
+  /** A Parking Candidate whose 20 min drive runs through the west ZBE in its first 10 min, by way of `via`. */
+  function engineThrough(c: ParkingCandidate, ...via: [lat: number, lng: number, atMin: number][]) {
+    return fakeRoutingEngine({
+      driveFromOrigin: [[c.location, min(20)]],
+      transitToDestination: [[c.location, { durationS: min(30), transfers: 0 }]],
+      trafficDriveFromOrigin: [[c.location, trafficDrive(c.location, 20, ...via)]],
+    });
+  }
+
+  it("lets a drive along an Exempt Corridor through a ZBE during its Restriction Window", async () => {
+    const along = candidate("along", 41.46, 3);
+    const engine = engineThrough(along, [41.53, 1.81, 2], [41.49, 1.81, 10]);
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, [along], { zbes: [withCorridor] }, engine);
+
+    expect(recommendation.options.map((o) => o.candidate.id)).toEqual(["along"]);
+  });
+
+  it("discards a drive that takes an exit off the Exempt Corridor into the ZBE", async () => {
+    const along = candidate("along", 41.45, 3);
+    const offTheCorridor = candidate("off-the-corridor", 41.46, 3);
+    const all = [along, offTheCorridor];
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: all.map((c) => [c.location, min(20)]),
+      transitToDestination: all.map((c) => [c.location, { durationS: min(30), transfers: 0 }]),
+      trafficDriveFromOrigin: [
+        [along.location, trafficDrive(along.location, 20, [41.53, 1.81, 2], [41.49, 1.81, 10])],
+        // Leaves the corridor halfway through the ZBE, ~650 m east through its streets, and south out of it.
+        [offTheCorridor.location, trafficDrive(offTheCorridor.location, 20, [41.53, 1.81, 2], [41.51, 1.81, 5], [41.51, 1.818, 7], [41.49, 1.818, 10])],
+      ],
+    });
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, all, { zbes: [withCorridor] }, engine);
+
+    expect(recommendation.options.map((o) => o.candidate.id)).toEqual(["along"]);
+  });
+
+  it("counts a drive a few metres off the corridor's centreline as on it, but not a road 25 m beside it", async () => {
+    // Longitude degrees are ~83.4 km here: 0.0001° is ~8 m, 0.0003° is ~25 m.
+    const fewMetresOff = candidate("few-metres-off", 41.45, 3);
+    const beside = candidate("beside", 41.46, 3);
+    const all = [fewMetresOff, beside];
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: all.map((c) => [c.location, min(20)]),
+      transitToDestination: all.map((c) => [c.location, { durationS: min(30), transfers: 0 }]),
+      trafficDriveFromOrigin: [
+        [fewMetresOff.location, trafficDrive(fewMetresOff.location, 20, [41.53, 1.8101, 2], [41.49, 1.8101, 10])],
+        [beside.location, trafficDrive(beside.location, 20, [41.53, 1.8103, 2], [41.49, 1.8103, 10])],
+      ],
+    });
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, all, { zbes: [withCorridor] }, engine);
+
+    expect(recommendation.options.map((o) => o.candidate.id)).toEqual(["few-metres-off"]);
+  });
+
+  it("exempts a drive only from the ZBE whose Exempt Corridor it is on", async () => {
+    // Another ZBE overlapping the west one's southern half, without corridors of its own.
+    const overlapping = squareZbe("overlapping", { lat: 41.495, lng: 1.805, side: 0.01 });
+    const along = candidate("along", 41.46, 3);
+    const engine = engineThrough(along, [41.53, 1.81, 2], [41.49, 1.81, 10]);
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, [along], { zbes: [withCorridor, overlapping] }, engine);
+
+    expect(recommendation.options).toEqual([]);
+  });
+});
