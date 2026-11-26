@@ -21,7 +21,7 @@ The app reads published datasets from `public/data/`, rebuilt from their sources
 npm run data:zbes   # every Catalan ZBE in the DGT NAP DATEX II feed and OSM → public/data/zbes.json
 ```
 
-DGT is the source of truth for every ZBE it lists. OSM `boundary=low_emission_zone` (queried from Overpass, bounded to Catalonia) fills in ZBEs DGT lacks, once their `start_date`/`opening_date` has come. Where DGT and OSM draw the same ZBE differently by more than 5,000 m², the difference becomes a **disputed area**: it counts as inside the ZBE and is hatched on the map until a settlement in [src/dataset/settlements.ts](src/dataset/settlements.ts) decides it inside or outside.
+DGT is the source of truth for every ZBE it lists. OSM `boundary=low_emission_zone` (queried from Overpass, bounded to Catalonia) fills in ZBEs DGT lacks, once their `start_date`/`opening_date` has come. Where DGT and OSM draw the same ZBE differently, by more than 5,000 m² and somewhere at least 30 m across, the difference becomes a **Disputed Area**: it counts as inside the ZBE and is hatched on the map until a Settlement in [src/dataset/settlements.ts](src/dataset/settlements.ts) decides it inside or outside.
 
 Restriction Windows and barred Environmental Labels come from the hand-maintained table in [src/dataset/restrictionTable.ts](src/dataset/restrictionTable.ts), not from DGT. A ZBE missing from the table is published with the worst case (all day, every day), and the build warns about it.
 
