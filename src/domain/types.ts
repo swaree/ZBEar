@@ -1,3 +1,5 @@
+import type { EnvironmentalLabel } from "./zbe";
+
 export interface LatLng {
   lat: number;
   lng: number;
@@ -55,6 +57,8 @@ export interface TripRequest {
   destination: LatLng;
   /** The traveller must be at the Destination by this time. */
   arriveBy: Date;
+  /** The vehicle's Environmental Label, which decides the ZBEs that bar it. Defaults to none. */
+  vehicleLabel?: EnvironmentalLabel;
 }
 
 /** One Parking Candidate evaluated for a specific Trip. */

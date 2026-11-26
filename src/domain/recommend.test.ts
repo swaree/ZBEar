@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { recommend } from "./recommend";
 import type { LatLng, ParkingCandidate } from "./types";
-import type { Zbe } from "./zbe";
+import type { EnvironmentalLabel, Zbe } from "./zbe";
 import { fakeRoutingEngine } from "../routing/fakeRoutingEngine";
+import type { TrafficDrive } from "../routing/RoutingEngine";
 
 const origin: LatLng = { lat: 41.6, lng: 1.9 };
 const destination: LatLng = { lat: 41.387, lng: 2.17 };
@@ -53,6 +54,22 @@ function candidateOnTheWay(id: string, t: number, timeToFindSpaceMin = 3): Parki
     timeToFindSpaceMin,
     origin.lng + t * (destination.lng - origin.lng),
   );
+}
+
+/**
+ * A hand-made drive with traffic from the Origin, through `via` (each a point and the minute the car
+ * passes it), to `to`, which it reaches at `totalMin`.
+ */
+function trafficDrive(to: LatLng, totalMin: number, ...via: [lat: number, lng: number, atMin: number][]): TrafficDrive {
+  return {
+    durationS: min(totalMin),
+    distanceM: 30_000,
+    path: [
+      { ...origin, atS: 0 },
+      ...via.map(([lat, lng, atMin]) => ({ lat, lng, atS: min(atMin) })),
+      { ...to, atS: min(totalMin) },
+    ],
+  };
 }
 
 describe("recommend", () => {
@@ -289,6 +306,8 @@ describe("recommend", () => {
         [atTheEdge.location, { durationS: min(15), transfers: 0 }],
         [farOut.location, { durationS: min(28), transfers: 0 }],
       ],
+      // Down the coast road, south of the ZBE, to the parking at its edge.
+      trafficDriveFromOrigin: [[atTheEdge.location, trafficDrive(atTheEdge.location, 45, [41.35, 1.95, 30])]],
     });
 
     const recommendation = await recommend({ origin, destination, arriveBy }, [atTheEdge, farOut], { zbes: [zbe] }, engine);
@@ -298,5 +317,244 @@ describe("recommend", () => {
       ["far-out", 43],
       ["at-the-edge", 63],
     ]);
+  });
+});
+
+describe("recommend: traffic pass", () => {
+  it("ranks Options by their drive time with traffic, not free-flow", async () => {
+    const jammed = candidate("jammed", 41.41, 3);
+    const clear = candidate("clear", 41.42, 3);
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: [
+        [jammed.location, min(15)],
+        [clear.location, min(20)],
+      ],
+      transitToDestination: [
+        [jammed.location, { durationS: min(30), transfers: 0 }],
+        [clear.location, { durationS: min(30), transfers: 0 }],
+      ],
+      trafficDriveFromOrigin: [
+        [jammed.location, trafficDrive(jammed.location, 40)],
+        [clear.location, trafficDrive(clear.location, 22)],
+      ],
+    });
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, [jammed, clear], noZbes, engine);
+
+    // clear: 22 + 3 + 30 = 55 min; jammed: 40 + 3 + 30 = 73 min.
+    expect(recommendation.options.map((o) => [o.candidate.id, o.driveS / 60, o.doorToDoorS / 60])).toEqual([
+      ["clear", 22, 55],
+      ["jammed", 40, 73],
+    ]);
+    expect(recommendation.options[0]?.leaveOriginAt).toEqual(new Date("2026-12-01T08:05:00+01:00"));
+  });
+
+  it("checks traffic only for the best Parking Candidates by free-flow time, as many as the traffic pass size", async () => {
+    const first = candidate("first", 41.41, 3);
+    const second = candidate("second", 41.42, 3);
+    // Third on free-flow time, though traffic would make it the fastest: it never gets a traffic check.
+    const third = candidate("third", 41.43, 3);
+    const all = [first, second, third];
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: [
+        [first.location, min(10)],
+        [second.location, min(12)],
+        [third.location, min(14)],
+      ],
+      transitToDestination: all.map((c) => [c.location, { durationS: min(30), transfers: 0 }]),
+      trafficDriveFromOrigin: [
+        [first.location, trafficDrive(first.location, 25)],
+        [second.location, trafficDrive(second.location, 25)],
+        [third.location, trafficDrive(third.location, 5)],
+      ],
+    });
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, all, noZbes, engine, { trafficPassSize: 2 });
+
+    expect(recommendation.options.map((o) => o.candidate.id)).toEqual(["first", "second"]);
+  });
+
+  it("checks traffic for the best 20 Parking Candidates unless told otherwise", async () => {
+    const all = Array.from({ length: 22 }, (_, i) => candidate(`c${i + 1}`, 41.4 + i / 200, 3));
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: all.map((c, i) => [c.location, min(10 + i)]),
+      transitToDestination: all.map((c) => [c.location, { durationS: min(30), transfers: 0 }]),
+      // The two slowest on free-flow time would be the fastest with traffic.
+      trafficDriveFromOrigin: all.map((c, i) => [c.location, trafficDrive(c.location, i >= 20 ? 5 : 40 + i)]),
+    });
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, all, noZbes, engine);
+
+    expect(recommendation.options.map((o) => o.candidate.id)).toEqual(["c1", "c2", "c3", "c4", "c5"]);
+  });
+
+  it("asks for the traffic when the driver would leave: the arrive-by time less transit, finding a space and the free-flow drive", async () => {
+    const a = candidate("a", 41.41, 3);
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: [[a.location, min(20)]],
+      transitToDestination: [[a.location, { durationS: min(30), transfers: 0 }]],
+      // Rush hour builds up after 08:07: leaving then is a 26 min drive, any later is far slower.
+      trafficDriveFromOrigin: [
+        [
+          a.location,
+          (departAt) =>
+            trafficDrive(a.location, departAt.getTime() === new Date("2026-12-01T08:07:00+01:00").getTime() ? 26 : 60),
+        ],
+      ],
+    });
+
+    const [option] = (await recommend({ origin, destination, arriveBy }, [a], noZbes, engine)).options;
+
+    expect(option?.driveS).toBe(min(26));
+    expect(option?.leaveOriginAt).toEqual(new Date("2026-12-01T08:01:00+01:00"));
+  });
+
+  it("leaves out a Parking Candidate the drive with traffic cannot reach", async () => {
+    const reachable = candidate("reachable", 41.41, 3);
+    const closedRoad = candidate("closed-road", 41.42, 3);
+    const all = [reachable, closedRoad];
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: all.map((c) => [c.location, min(10)]),
+      transitToDestination: all.map((c) => [c.location, { durationS: min(30), transfers: 0 }]),
+      trafficDriveFromOrigin: [[closedRoad.location, null]],
+    });
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, all, noZbes, engine);
+
+    expect(recommendation.options.map((o) => o.candidate.id)).toEqual(["reachable"]);
+  });
+});
+
+describe("recommend: drives through ZBEs", () => {
+  /** West of the Origin, away from every straight drive to the candidates (which all lie east of it). */
+  const westZbe = squareZbe("west", { lat: 41.5, lng: 1.8, side: 0.02 });
+
+  it("discards an Option whose drive cuts through a ZBE during its Restriction Window", async () => {
+    const around = candidate("around", 41.45, 3);
+    const through = candidate("through", 41.46, 3);
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: [
+        [around.location, min(25)],
+        [through.location, min(20)],
+      ],
+      transitToDestination: [
+        [around.location, { durationS: min(30), transfers: 0 }],
+        [through.location, { durationS: min(30), transfers: 0 }],
+      ],
+      trafficDriveFromOrigin: [
+        // Leaves at 08:07 and crosses the ZBE from north to south around 08:13, on a Tuesday.
+        [through.location, trafficDrive(through.location, 20, [41.53, 1.81, 4], [41.49, 1.81, 8])],
+      ],
+    });
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, [around, through], { zbes: [westZbe] }, engine);
+
+    expect(recommendation.options.map((o) => o.candidate.id)).toEqual(["around"]);
+  });
+
+  it("judges the Restriction Window on the time the car is inside the ZBE, not when it leaves the Origin", async () => {
+    // Both drives take 27 min and spend about 16 min inside the ZBE (07:00–20:00 on weekdays).
+    const throughWest = (to: LatLng) => trafficDrive(to, 27, [41.521, 1.81, 4], [41.519, 1.81, 5], [41.505, 1.81, 20], [41.49, 1.81, 22]);
+    const late = candidate("late", 41.45, 3);
+    const early = candidate("early", 41.46, 3);
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: [
+        [late.location, min(27)],
+        [early.location, min(27)],
+      ],
+      transitToDestination: [
+        [late.location, { durationS: min(30), transfers: 0 }],
+        [early.location, { durationS: min(50), transfers: 0 }],
+      ],
+      trafficDriveFromOrigin: [
+        // Leaves at 06:50, enters the ZBE at 06:55 and is still inside at 07:10.
+        [late.location, throughWest(late.location)],
+        // Leaves at 06:30 and is out of the ZBE again by 06:51.
+        [early.location, throughWest(early.location)],
+      ],
+    });
+
+    const recommendation = await recommend(
+      { origin, destination, arriveBy: new Date("2026-12-01T07:50:00+01:00") },
+      [late, early],
+      { zbes: [westZbe] },
+      engine,
+    );
+
+    expect(recommendation.options.map((o) => [o.candidate.id, o.leaveOriginAt])).toEqual([
+      ["early", new Date("2026-12-01T06:30:00+01:00")],
+    ]);
+  });
+
+  /** A Parking Candidate whose 20 min drive crosses the west ZBE in its first 10 min. */
+  function throughWestEngine(c: ParkingCandidate) {
+    return fakeRoutingEngine({
+      driveFromOrigin: [[c.location, min(20)]],
+      transitToDestination: [[c.location, { durationS: min(30), transfers: 0 }]],
+      trafficDriveFromOrigin: [[c.location, trafficDrive(c.location, 20, [41.53, 1.81, 2], [41.49, 1.81, 10])]],
+    });
+  }
+
+  it("judges the Restriction Window in local Catalan time (Europe/Madrid), not UTC", async () => {
+    const through = candidate("through", 41.46, 3);
+
+    // In the ZBE from about 06:10 to 06:20 UTC, which is 07:10 to 07:20 in Barcelona in winter.
+    const recommendation = await recommend(
+      { origin, destination, arriveBy: new Date("2026-12-01T07:00:00Z") },
+      [through],
+      { zbes: [westZbe] },
+      throughWestEngine(through),
+    );
+
+    expect(recommendation.options).toEqual([]);
+  });
+
+  it("lets a drive through a ZBE on a day outside its Restriction Window", async () => {
+    const through = candidate("through", 41.46, 3);
+
+    // Saturday morning; the window is Monday to Friday.
+    const recommendation = await recommend(
+      { origin, destination, arriveBy: new Date("2026-12-05T09:00:00+01:00") },
+      [through],
+      { zbes: [westZbe] },
+      throughWestEngine(through),
+    );
+
+    expect(recommendation.options.map((o) => o.candidate.id)).toEqual(["through"]);
+  });
+
+  it("counts driving through a ZBE's Disputed Areas as driving inside it", async () => {
+    const through = candidate("through", 41.46, 3);
+    // OSM draws a ZBE much further west than DGT does, across the drive.
+    const zbe: Zbe = { ...squareZbe("one", { lat: 41.5, lng: 1.7, side: 0.02 }), disputedAreas: westZbe.perimeter };
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, [through], { zbes: [zbe] }, throughWestEngine(through));
+
+    expect(recommendation.options).toEqual([]);
+  });
+
+  it("bars the vehicle only from the ZBEs that bar its Environmental Label", async () => {
+    // Bars vehicles with no label, as the west ZBE does, but also B, C and ECO.
+    const strictZbe: Zbe = { ...squareZbe("strict", { lat: 41.55, lng: 1.8, side: 0.02 }), barredLabels: ["none", "B", "C", "ECO"] };
+    const throughWest = candidate("through-west", 41.45, 3);
+    const throughStrict = candidate("through-strict", 41.46, 3);
+    const all = [throughWest, throughStrict];
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: all.map((c) => [c.location, min(20)]),
+      transitToDestination: all.map((c) => [c.location, { durationS: min(30), transfers: 0 }]),
+      trafficDriveFromOrigin: [
+        [throughWest.location, trafficDrive(throughWest.location, 20, [41.53, 1.81, 2], [41.49, 1.81, 10])],
+        [throughStrict.location, trafficDrive(throughStrict.location, 20, [41.58, 1.81, 2], [41.54, 1.81, 10])],
+      ],
+    });
+    const plan = (vehicleLabel?: EnvironmentalLabel) =>
+      recommend({ origin, destination, arriveBy, vehicleLabel }, all, { zbes: [westZbe, strictZbe] }, engine).then((r) =>
+        r.options.map((o) => o.candidate.id).sort(),
+      );
+
+    expect(await plan()).toEqual([]);
+    expect(await plan("none")).toEqual([]);
+    expect(await plan("B")).toEqual(["through-west"]);
+    expect(await plan("0")).toEqual(["through-strict", "through-west"]);
   });
 });

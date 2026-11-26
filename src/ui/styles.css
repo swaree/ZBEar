@@ -87,7 +87,8 @@ a {
   font-size: 0.875rem;
 }
 
-.trip-form input {
+.trip-form input,
+.trip-form select {
   font: inherit;
   padding: 10px 12px;
   border-radius: 8px;

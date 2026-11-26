@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { recommend } from "../domain/recommend";
 import type { Baseline, LatLng, Option, ParkingCandidate, Recommendation, TripRequest } from "../domain/types";
-import type { Zbe } from "../domain/zbe";
+import { ENVIRONMENTAL_LABELS, type EnvironmentalLabel, type Zbe } from "../domain/zbe";
 import { loadDiscoveredParkingCandidates } from "../data/parkingCandidates";
 import { loadZbeDataset } from "../data/zbeDataset";
+import { mapboxEngine } from "../routing/mapbox";
+import type { RoutingEngine } from "../routing/RoutingEngine";
 import { transitousEngine } from "../routing/transitous";
 import { MapView } from "./MapView";
 import { googleMapsTransitUrl } from "./mapLinks";
@@ -16,8 +18,15 @@ type TapTarget = "origin" | "destination";
 const NO_ZBES: Zbe[] = [];
 const NO_CANDIDATES: ParkingCandidate[] = [];
 
+/** Until the personal store (#14) holds vehicle settings, the label is remembered on this device only. */
+const LABEL_STORAGE_KEY = "zbear:vehicle-label";
+
 export function App() {
-  const engine = useMemo(() => transitousEngine(), []);
+  const engine = useMemo<RoutingEngine>(
+    () => ({ ...transitousEngine(), ...mapboxEngine({ token: import.meta.env.VITE_MAPBOX_TOKEN }) }),
+    [],
+  );
+  const [vehicleLabel, setVehicleLabel] = useState<EnvironmentalLabel>(loadVehicleLabel);
   const [originText, setOriginText] = useState("");
   const [destinationText, setDestinationText] = useState("");
   const [arriveByText, setArriveByText] = useState(defaultArriveBy);
@@ -57,7 +66,10 @@ export function App() {
   const destination = parseLatLng(destinationText);
   const arriveBy = arriveByText ? new Date(arriveByText) : null;
   const outdated =
-    planned != null && (!samePoint(planned.trip.origin, origin) || !samePoint(planned.trip.destination, destination));
+    planned != null &&
+    (!samePoint(planned.trip.origin, origin) ||
+      !samePoint(planned.trip.destination, destination) ||
+      planned.trip.vehicleLabel !== vehicleLabel);
   const beyondHorizon = arriveBy != null && arriveBy.getTime() - Date.now() > TIMETABLE_HORIZON_DAYS * 86_400_000;
 
   function onMapTap(point: LatLng) {
@@ -70,13 +82,22 @@ export function App() {
     }
   }
 
+  function onVehicleLabelChange(label: EnvironmentalLabel) {
+    setVehicleLabel(label);
+    try {
+      localStorage.setItem(LABEL_STORAGE_KEY, label);
+    } catch {
+      // Storage blocked: the setting still applies until the page is reloaded.
+    }
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!origin || !destination || !arriveBy || !zbes || !candidates) return;
     setBusy(true);
     setError(null);
     try {
-      const trip: TripRequest = { origin, destination, arriveBy };
+      const trip: TripRequest = { origin, destination, arriveBy, vehicleLabel };
       const recommendation = await recommend(trip, candidates, { zbes }, engine);
       const fitTo = [origin, destination, ...recommendation.options.map((o) => o.candidate.location)];
       setPlanned({ trip, recommendation, fitTo });
@@ -120,6 +141,16 @@ export function App() {
           Arrive by
           <input type="datetime-local" value={arriveByText} onChange={(e) => setArriveByText(e.target.value)} />
         </label>
+        <label>
+          Environmental Label <span className="hint">decides which ZBEs bar the car</span>
+          <select value={vehicleLabel} onChange={(e) => onVehicleLabelChange(e.target.value as EnvironmentalLabel)}>
+            {ENVIRONMENTAL_LABELS.map((label) => (
+              <option key={label} value={label}>
+                {label === "none" ? "None" : label}
+              </option>
+            ))}
+          </select>
+        </label>
         {beyondHorizon && (
           <p className="notice">
             More than {TIMETABLE_HORIZON_DAYS} days ahead: some operators (notably Rodalies) may not have published
@@ -139,10 +170,13 @@ export function App() {
 
       {planned && (
         <section className={outdated ? "results outdated" : "results"}>
-          {outdated && <p className="notice">The Origin or Destination changed since planning: press Find parking again.</p>}
+          {outdated && (
+            <p className="notice">The Origin, Destination or Environmental Label changed since planning: press Find parking again.</p>
+          )}
           <BaselineCard baseline={planned.recommendation.baseline} trip={planned.trip} />
           {planned.recommendation.options.length === 0 ? (
-            <p>No Parking Candidate can reach this Destination by that time.</p>
+            <p>No Parking Candidate can reach this Destination by that time without driving through a ZBE that bars
+              the car.</p>
           ) : (
             <ol className="options">
               {planned.recommendation.options.map((o) => (
@@ -192,7 +226,9 @@ export function App() {
         <span className="legend-disputed" aria-hidden="true" /> Dashed areas: the DGT and OSM perimeters disagree, so
         they count as inside the ZBE. ZBE perimeters from the{" "}
         <a href="https://nap.dgt.es/en/dataset/zonas-de-bajas-emisiones">DGT NAP</a> (CC BY 4.0) and OpenStreetMap
-        (ODbL). Transit and driving times by <a href="https://transitous.org/sources/">Transitous</a> and its data sources. Map
+        (ODbL). Transit and free-flow driving times by <a href="https://transitous.org/sources/">Transitous</a> and its data
+        sources. Driving times with traffic: directions powered by{" "}
+        <a href="https://www.mapbox.com/about/maps">© Mapbox</a>. Map
         data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, tiles by{" "}
         <a href="https://openfreemap.org">OpenFreeMap</a>.
       </footer>
@@ -251,6 +287,15 @@ function TimeSaved({ seconds }: { seconds: number }) {
   ) : (
     <div className="time-saved slower">{-m} min slower than transit only</div>
   );
+}
+
+function loadVehicleLabel(): EnvironmentalLabel {
+  try {
+    const stored = localStorage.getItem(LABEL_STORAGE_KEY);
+    return ENVIRONMENTAL_LABELS.find((label) => label === stored) ?? "none";
+  } catch {
+    return "none";
+  }
 }
 
 function parseLatLng(text: string): LatLng | null {

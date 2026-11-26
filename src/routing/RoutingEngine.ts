@@ -9,6 +9,19 @@ export interface TransitDuration {
   transfers: number;
 }
 
+/** A point on a drive and when the car passes it, in seconds after the drive departs. */
+export interface TimedPoint extends LatLng {
+  atS: number;
+}
+
+/** A drive with the traffic expected at its departure time. */
+export interface TrafficDrive {
+  durationS: number;
+  distanceM: number;
+  /** The road path from start to end, timed: the first point is at 0 s, the last at the end of the drive. */
+  path: TimedPoint[];
+}
+
 /**
  * The routing port the Recommendation depends on (ADR-0002). Results line up
  * with the order of `many`; `null` means no route was found.
@@ -19,4 +32,7 @@ export interface RoutingEngine {
 
   /** Free-flow driving time in seconds from `one` to each of `many`, with no traffic. */
   driveFreeFlowOneToMany(one: LatLng, many: LatLng[]): Promise<(number | null)[]>;
+
+  /** Driving from `from` to `to` in the traffic expected when departing at `departAt`. */
+  driveWithTraffic(from: LatLng, to: LatLng, departAt: Date): Promise<TrafficDrive | null>;
 }

@@ -13,6 +13,14 @@ npm test
 npm run build    # typechecks the app and the Pages Functions, then builds to dist/
 ```
 
+Drives with traffic come from Mapbox, which needs a token. Put it in a gitignored `.env` at the repo root:
+
+```sh
+VITE_MAPBOX_TOKEN=pk.…
+```
+
+Open the Mapbox account without a payment method, so going over the free cap fails requests instead of billing. Without a token the app still loads, but every Trip fails, because no drive can be checked against the ZBEs.
+
 ## Datasets
 
 The app reads published datasets from `public/data/`, rebuilt from their sources and committed:
@@ -31,13 +39,13 @@ npm run data:candidates   # OSM car parks in Catalonia → public/data/parking-c
 
 **Discovered Parking Candidates** are OSM `amenity=parking` outside every ZBE (disputed areas count as inside), within 500 m straight-line of a transit stop of any mode, and not `access=private|customers|permit|no|delivery|employees`. Distance to a ZBE edge doesn't matter: a car park at a fast rail station far out can beat one at the edge. Car parks within 150 m merge into one candidate that takes the name, location, kind, Parking Conditions and OSM ID of the first of them: a P+R, else the lowest OSM ID. New OSM elements get higher IDs, so a candidate's ID survives rebuilds even as car parks are mapped or edited nearby (unless a new P+R appears), while the other car parks' Parking Conditions are not kept. Unnamed car parks are named after the nearest named transit stop. The kind (car park, P+R, street) and the `fee`, `charge`, `maxstay`, `access` and `opening_hours` tags are carried over as they are; missing ones stay unknown.
 
-Each query then picks the candidates worth routing: those whose straight-line detour (Origin → candidate → Destination against Origin → Destination) is at most 1.5, and no more than the 127 with the smallest detours, so every Transitous one-to-many call stays within its 128-point fair use.
+Each query then picks the candidates worth routing: those whose straight-line detour (Origin → candidate → Destination against Origin → Destination) is at most 1.5, and no more than the 127 with the smallest detours, so every Transitous one-to-many call stays within its 128-point fair use. The best 20 of those by free-flow door-to-door time get a drive with traffic from Mapbox, departing when the free-flow times say to leave. Each drive's timed path is checked against every ZBE, and an Option is discarded if the car would be inside a ZBE that bars its Environmental Label at any moment of that ZBE's Restriction Window (Europe/Madrid time). The rest are never offered, because their drives aren't checked. Mapbox results are used only within the query and never stored, as its terms require. Exempt Corridors aren't modelled yet, so a drive along the Rondes currently counts as driving inside the ZBE.
 
 Pages Functions (`functions/`) run only on Cloudflare; running them locally needs Wrangler, which needs Node 22.
 
 ## Deploy
 
-Cloudflare Pages builds every push to `main` (Git integration, Node from `.node-version`). The site sits behind Cloudflare Access, and personal data lives only in the `ZBEAR_KV` key-value store, never in this repo ([ADR-0004](docs/adr/0004-public-code-private-data.md)).
+Cloudflare Pages builds every push to `main` (Git integration, Node from `.node-version`), with `VITE_MAPBOX_TOKEN` set as a build environment variable. The site sits behind Cloudflare Access, and personal data lives only in the `ZBEAR_KV` key-value store, never in this repo ([ADR-0004](docs/adr/0004-public-code-private-data.md)).
 
 First-time setup of the Cloudflare side is a guided script:
 
@@ -47,4 +55,4 @@ First-time setup of the Cloudflare side is a guided script:
 
 ## Data and attribution
 
-ZBE perimeters from the [DGT National Access Point](https://nap.dgt.es/en/dataset/zonas-de-bajas-emisiones) (CC BY 4.0) and [OpenStreetMap](https://www.openstreetmap.org/copyright) (ODbL). Transit and free-flow driving times by [Transitous](https://transitous.org/sources/) and its data sources. Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, tiles by [OpenFreeMap](https://openfreemap.org).
+ZBE perimeters from the [DGT National Access Point](https://nap.dgt.es/en/dataset/zonas-de-bajas-emisiones) (CC BY 4.0) and [OpenStreetMap](https://www.openstreetmap.org/copyright) (ODbL). Transit and free-flow driving times by [Transitous](https://transitous.org/sources/) and its data sources. Driving times with traffic by [© Mapbox](https://www.mapbox.com/about/maps). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, tiles by [OpenFreeMap](https://openfreemap.org).

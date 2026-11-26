@@ -7,7 +7,9 @@ import type { RoutingEngine, TransitDuration } from "./RoutingEngine";
  * Caveat: each operator's timetable only reaches as far ahead as its GTFS feed
  * (Renfe Rodalies is only a few days), so far-future Trips can silently miss modes.
  */
-export function transitousEngine(opts: { fetch?: typeof fetch } = {}): RoutingEngine {
+export function transitousEngine(
+  opts: { fetch?: typeof fetch } = {},
+): Pick<RoutingEngine, "transitManyToOne" | "driveFreeFlowOneToMany"> {
   const fetchFn = opts.fetch ?? ((...args) => fetch(...args));
 
   async function get<T>(path: string, params: Record<string, string>): Promise<T> {
