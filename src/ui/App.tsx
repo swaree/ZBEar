@@ -20,6 +20,7 @@ import { loadZbeDataset } from "../data/zbeDataset";
 import { mapboxEngine } from "../routing/mapbox";
 import type { RoutingEngine } from "../routing/RoutingEngine";
 import { transitousEngine } from "../routing/transitous";
+import { formatDuration } from "./duration";
 import { MapView } from "./MapView";
 import { googleMapsTransitUrl } from "./mapLinks";
 import { readTripReturn, type ReturnForm, type ReturnMode } from "./tripReturn";
@@ -341,14 +342,14 @@ function OptionCard({
         <div className="option-head">
           <span className="option-name">{option.candidate.name}</span>
           <span className="option-total">
-            {minutes(option.doorToDoorS)}
+            {formatDuration(option.doorToDoorS)}
             {option.returnLeg && <span className="hint"> round trip</span>}
           </span>
         </div>
         {option.timeSavedS != null && <TimeSaved seconds={option.timeSavedS} />}
         <div className="option-split">
-          drive {minutes(option.driveS)} · find a space {minutes(option.timeToFindSpaceS)} · transit{" "}
-          {minutes(option.transitS)} ({transfers(option.transfers)})
+          drive {formatDuration(option.driveS)} · find a space {formatDuration(option.timeToFindSpaceS)} · transit{" "}
+          {formatDuration(option.transitS)} ({transfers(option.transfers)})
         </div>
         <div className="option-times">
           Leave the Origin at {clock(option.leaveOriginAt)} · leave the parking at {clock(option.leaveParkingAt)}
@@ -356,7 +357,7 @@ function OptionCard({
         {option.returnLeg && (
           <>
             <div className="option-split">
-              back: transit {minutes(option.returnLeg.transitS)} ({transfers(option.returnLeg.transfers)}) · drive {minutes(option.returnLeg.driveS)}
+              back: transit {formatDuration(option.returnLeg.transitS)} ({transfers(option.returnLeg.transfers)}) · drive {formatDuration(option.returnLeg.driveS)}
             </div>
             <div className="option-times">
               Drive back from the parking at {clock(option.returnLeg.driveFromParkingAt)} · at the Origin at{" "}
@@ -382,7 +383,7 @@ function OptionCard({
 function conflictText(conflict: ParkingConflict, arrival: Date): string {
   switch (conflict.kind) {
     case "max-stay-exceeded":
-      return `stays longer than the maximum ${minutes(conflict.maxStayS)}`;
+      return `stays longer than the maximum ${formatDuration(conflict.maxStayS)}`;
     case "resident-only":
       return "residents only";
     case "closed-during-stay":
@@ -403,15 +404,15 @@ function DirectDriveCard({ directDrive, trip }: { directDrive: DirectDrive; trip
       <div className="option-head">
         <span className="option-name">Direct Drive</span>
         <span className="option-total">
-          {minutes(directDrive.doorToDoorS)}
+          {formatDuration(directDrive.doorToDoorS)}
           {back && <span className="hint"> round trip</span>}
         </span>
       </div>
       {directDrive.timeSavedS != null && <TimeSaved seconds={directDrive.timeSavedS} />}
       <div className="option-split">
-        Never inside a ZBE while it bars the car{back ? ", there or back" : ""}: drive {minutes(directDrive.driveS)} · find a space{" "}
-        {minutes(directDrive.timeToFindSpaceS)}
-        {back && <> · drive back {minutes(back.driveS)}</>}
+        Never inside a ZBE while it bars the car{back ? ", there or back" : ""}: drive {formatDuration(directDrive.driveS)} · find a space{" "}
+        {formatDuration(directDrive.timeToFindSpaceS)}
+        {back && <> · drive back {formatDuration(back.driveS)}</>}
       </div>
       <div className="option-times">
         Leave the Origin at {clock(directDrive.leaveOriginAt)}
@@ -468,12 +469,12 @@ function BaselineCard({ baseline, trip }: { baseline: Baseline | null; trip: Tri
   const back = baseline.returnLeg;
   return (
     <p className="baseline">
-      Transit only, no car: <strong>{minutes(baseline.transitS + (back?.transitS ?? 0))}</strong>
+      Transit only, no car: <strong>{formatDuration(baseline.transitS + (back?.transitS ?? 0))}</strong>
       {back && " round trip"}, leaving the Origin at {clock(baseline.leaveOriginAt)} ({transfers(baseline.transfers)})
       {back && (
         <>
           {" "}
-          and back in {minutes(back.transitS)} ({transfers(back.transfers)}), at
+          and back in {formatDuration(back.transitS)} ({transfers(back.transfers)}), at
           the Origin at {clock(back.arriveOriginAt)}
         </>
       )}
@@ -483,12 +484,11 @@ function BaselineCard({ baseline, trip }: { baseline: Baseline | null; trip: Tri
 }
 
 function TimeSaved({ seconds }: { seconds: number }) {
-  const m = Math.round(seconds / 60);
-  if (m === 0) return <div className="time-saved">same as transit only</div>;
-  return m > 0 ? (
-    <div className="time-saved">{m} min faster than transit only</div>
+  if (Math.round(seconds / 60) === 0) return <div className="time-saved">same as transit only</div>;
+  return seconds > 0 ? (
+    <div className="time-saved">{formatDuration(seconds)} faster than transit only</div>
   ) : (
-    <div className="time-saved slower">{-m} min slower than transit only</div>
+    <div className="time-saved slower">{formatDuration(-seconds)} slower than transit only</div>
   );
 }
 
@@ -521,7 +521,6 @@ const samePoint = (a: LatLng, b: LatLng | null) => b != null && a.lat === b.lat 
 /** About 1 m of precision; more digits would only be noise from a finger tap. */
 const formatLatLng = (p: LatLng) => `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
 
-const minutes = (s: number) => `${Math.round(s / 60)} min`;
 const transfers = (n: number) => `${n} ${n === 1 ? "transfer" : "transfers"}`;
 const clock = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
