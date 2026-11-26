@@ -6,6 +6,7 @@ import { seedCandidates } from "../data/seedCandidates";
 import { loadZbeDataset } from "../data/zbeDataset";
 import { transitousEngine } from "../routing/transitous";
 import { MapView } from "./MapView";
+import { googleMapsTransitUrl } from "./mapLinks";
 
 /** Operators' timetables (notably Rodalies) only reach a few days ahead. */
 const TIMETABLE_HORIZON_DAYS = 3;
@@ -123,7 +124,7 @@ export function App() {
       {planned && (
         <section className={outdated ? "results outdated" : "results"}>
           {outdated && <p className="notice">The Origin or Destination changed since planning: press Find parking again.</p>}
-          <BaselineCard baseline={planned.recommendation.baseline} />
+          <BaselineCard baseline={planned.recommendation.baseline} trip={planned.trip} />
           {planned.recommendation.options.length === 0 ? (
             <p>No Parking Candidate can reach this Destination by that time.</p>
           ) : (
@@ -201,14 +202,24 @@ function OptionCard({ option, selected, onSelect }: { option: Option; selected: 
   );
 }
 
-function BaselineCard({ baseline }: { baseline: Baseline | null }) {
+function BaselineCard({ baseline, trip }: { baseline: Baseline | null; trip: TripRequest }) {
+  const link = (
+    <a href={googleMapsTransitUrl(trip.origin, trip.destination)} target="_blank" rel="noopener noreferrer">
+      Open in Google Maps
+    </a>
+  );
   if (!baseline) {
-    return <p className="baseline">Transit only, no car: no connection reaches the Destination by that time.</p>;
+    return (
+      <p className="baseline">
+        Transit only, no car: no connection reaches the Destination by that time. {link}
+      </p>
+    );
   }
   return (
     <p className="baseline">
       Transit only, no car: <strong>{minutes(baseline.transitS)}</strong>, leaving the Origin at{" "}
-      {clock(baseline.leaveOriginAt)} ({baseline.transfers} {baseline.transfers === 1 ? "transfer" : "transfers"})
+      {clock(baseline.leaveOriginAt)} ({baseline.transfers} {baseline.transfers === 1 ? "transfer" : "transfers"}).{" "}
+      {link} <span className="hint">(set the arrival time there)</span>
     </p>
   );
 }
