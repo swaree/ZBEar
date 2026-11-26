@@ -8,20 +8,35 @@ import { MapView } from "./MapView";
 /** Operators' timetables (notably Rodalies) only reach a few days ahead. */
 const TIMETABLE_HORIZON_DAYS = 3;
 
+type TapTarget = "origin" | "destination";
+
 export function App() {
   const engine = useMemo(() => transitousEngine(), []);
   const [originText, setOriginText] = useState("");
   const [destinationText, setDestinationText] = useState("");
   const [arriveByText, setArriveByText] = useState(defaultArriveBy);
-  const [planned, setPlanned] = useState<{ trip: TripRequest; recommendation: Recommendation } | null>(null);
+  const [planned, setPlanned] = useState<{ trip: TripRequest; recommendation: Recommendation; fitTo: LatLng[] } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [tapTarget, setTapTarget] = useState<TapTarget>("origin");
 
   const origin = parseLatLng(originText);
   const destination = parseLatLng(destinationText);
   const arriveBy = arriveByText ? new Date(arriveByText) : null;
+  const outdated =
+    planned != null && (!samePoint(planned.trip.origin, origin) || !samePoint(planned.trip.destination, destination));
   const beyondHorizon = arriveBy != null && arriveBy.getTime() - Date.now() > TIMETABLE_HORIZON_DAYS * 86_400_000;
+
+  function onMapTap(point: LatLng) {
+    if (tapTarget === "origin") {
+      setOriginText(formatLatLng(point));
+      // Origin first, then the Destination: save a tap on the control when the Destination is still empty.
+      if (!destination) setTapTarget("destination");
+    } else {
+      setDestinationText(formatLatLng(point));
+    }
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -31,7 +46,8 @@ export function App() {
     try {
       const trip: TripRequest = { origin, destination, arriveBy };
       const recommendation = await recommend(trip, seedCandidates, engine);
-      setPlanned({ trip, recommendation });
+      const fitTo = [origin, destination, ...recommendation.options.map((o) => o.candidate.location)];
+      setPlanned({ trip, recommendation, fitTo });
       setSelected(recommendation.options[0]?.candidate.id ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -86,7 +102,8 @@ export function App() {
       {error && <p className="error">Could not plan this Trip: {error}</p>}
 
       {planned && (
-        <section className="results">
+        <section className={outdated ? "results outdated" : "results"}>
+          {outdated && <p className="notice">The Origin or Destination changed since planning: press Find parking again.</p>}
           {planned.recommendation.options.length === 0 ? (
             <p>No Parking Candidate can reach this Destination by that time.</p>
           ) : (
@@ -104,12 +121,33 @@ export function App() {
         </section>
       )}
 
-      <MapView
-        origin={planned?.trip.origin ?? origin}
-        destination={planned?.trip.destination ?? destination}
-        candidates={seedCandidates}
-        selectedId={selected}
-      />
+      <section className="map-panel">
+        <div className="tap-target" role="radiogroup" aria-label="Tap the map to set">
+          <span className="hint">Tap the map to set</span>
+          {(["origin", "destination"] as const).map((target) => (
+            <button
+              key={target}
+              type="button"
+              role="radio"
+              aria-checked={tapTarget === target}
+              className={tapTarget === target ? "active" : undefined}
+              onClick={() => setTapTarget(target)}
+            >
+              {target === "origin" ? "Origin" : "Destination"}
+            </button>
+          ))}
+        </div>
+        <MapView
+          origin={origin}
+          destination={destination}
+          candidates={seedCandidates}
+          selectedId={selected}
+          fitTo={planned?.fitTo ?? null}
+          onTap={onMapTap}
+          onOriginMoved={(p) => setOriginText(formatLatLng(p))}
+          onDestinationMoved={(p) => setDestinationText(formatLatLng(p))}
+        />
+      </section>
 
       <footer className="attribution">
         Transit and driving times by <a href="https://transitous.org/sources/">Transitous</a> and its data sources. Map
@@ -147,6 +185,11 @@ function parseLatLng(text: string): LatLng | null {
   const lng = Number(m[2]);
   return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
 }
+
+const samePoint = (a: LatLng, b: LatLng | null) => b != null && a.lat === b.lat && a.lng === b.lng;
+
+/** About 1 m of precision; more digits would only be noise from a finger tap. */
+const formatLatLng = (p: LatLng) => `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
 
 const minutes = (s: number) => `${Math.round(s / 60)} min`;
 const clock = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });

@@ -131,6 +131,15 @@ a {
   margin: 0;
 }
 
+.results {
+  display: grid;
+  gap: 8px;
+}
+
+.results.outdated .options {
+  opacity: 0.55;
+}
+
 .options {
   list-style: none;
   margin: 0;
@@ -175,6 +184,37 @@ a {
   font-size: 0.875rem;
 }
 
+.map-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.tap-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tap-target button {
+  font: inherit;
+  font-size: 0.875rem;
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tap-target button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
 .map {
   height: 360px;
   border-radius: 12px;
@@ -192,6 +232,14 @@ a {
 
 .marker-origin {
   background: var(--origin);
+}
+
+/* Origin and Destination can be dragged: give fingers a bigger target. */
+.marker.marker-draggable {
+  width: 24px;
+  height: 24px;
+  cursor: grab;
+  touch-action: none;
 }
 
 .marker-destination {
