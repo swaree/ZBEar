@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<payload xsi:type="conz:ControlledZoneTablePublication" xmlns:com="http://levelC/schema/3/common" xmlns:par="http://levelC/schema/3/parking" xmlns:ns6="http://levelC/schema/3/commonExtension" xmlns:loc="http://levelC/schema/3/locationReferencing" xmlns:tra="http://levelC/schema/3/trafficRegulation" xmlns:locex="http://levelC/schema/3/locationExtension" xmlns:conz="http://levelC/schema/3/controlledZone" xmlns:d2="http://levelC/schema/3/d2Payload" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <com:publicationTime>2026-01-20T08:44:54.108Z</com:publicationTime>
+    <com:publicationCreator>
+        <com:country>ES</com:country>
+        <com:nationalIdentifier>DGT</com:nationalIdentifier>
+    </com:publicationCreator>
+    <conz:controlledZoneTable>
+        <conz:controlledZone id="8121_ZBE Mataró">
+            <conz:name>
+                <com:values>
+                    <com:value lang="ES">ZBE Mataró</com:value>
+                </com:values>
+            </conz:name>
+            <conz:controlledZoneDescription>
+                <com:values>
+                    <com:value lang="ES">Restricciones de acceso a vehículos sin etiqueta, de lunes a viernes laborables de 7 h a 20 h.</com:value>
+                </com:values>
+            </conz:controlledZoneDescription>
+            <conz:controlledZoneRecordVersionTime>2026-01-14T11:19:42.663Z</conz:controlledZoneRecordVersionTime>
+            <conz:urlForFurtherInformation>https://www.mataro.cat/zbe</conz:urlForFurtherInformation>
+            <conz:status>active</conz:status>
+            <conz:trafficRegulationOrder>
+                <tra:trafficRegulation>
+                    <tra:typeOfRegulation xsi:type="tra:AccessRestriction">
+                        <tra:accessRestrictionType>noEntry</tra:accessRestrictionType>
+                    </tra:typeOfRegulation>
+                    <tra:condition xsi:type="tra:ConditionSet">
+                        <tra:operator>and</tra:operator>
+                        <tra:conditions xsi:type="tra:LocationCondition">
+                            <tra:implementedLocation xsi:type="loc:LocationGroupByList">
+                                <loc:locationContainedInGroup xsi:type="loc:AreaLocation">
+                                    <loc:openlrAreaLocationReference xsi:type="loc:OpenlrPolygonLocationReference">
+                                        <loc:openlrPolygonCorners>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.539085</loc:latitude>
+                                                <loc:longitude>2.449219</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.539787</loc:latitude>
+                                                <loc:longitude>2.448737</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.53995</loc:latitude>
+                                                <loc:longitude>2.448661</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.540157</loc:latitude>
+                                                <loc:longitude>2.4486308</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.54029</loc:latitude>
+                                                <loc:longitude>2.448629</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.540405</loc:latitude>
+                                                <loc:longitude>2.4486752</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.54054</loc:latitude>
+                                                <loc:longitude>2.4487007</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.540672</loc:latitude>
+                                                <loc:longitude>2.4486659</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.541546</loc:latitude>
+                                                <loc:longitude>2.4480119</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.54202</loc:latitude>
+                                                <loc:longitude>2.4443285</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.54136</loc:latitude>
+                                                <loc:longitude>2.4428458</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.541286</loc:latitude>
+                                                <loc:longitude>2.4427884</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.54116</loc:latitude>
+                                                <loc:longitude>2.4427595</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.541</loc:latitude>
+                                                <loc:longitude>2.4428203</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.540802</loc:latitude>
+                                                <loc:longitude>2.4428267</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.539486</loc:latitude>
+                                                <loc:longitude>2.442709</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.539383</loc:latitude>
+                                                <loc:longitude>2.4427621</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.539314</loc:latitude>
+                                                <loc:longitude>2.4428802</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.53772</loc:latitude>
+                                                <loc:longitude>2.4458637</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.539085</loc:latitude>
+                                                <loc:longitude>2.449219</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                        </loc:openlrPolygonCorners>
+                                    </loc:openlrAreaLocationReference>
+                                </loc:locationContainedInGroup>
+                            </tra:implementedLocation>
+                        </tra:conditions>
+                        <tra:conditions xsi:type="tra:ConditionSet">
+                            <tra:negate>true</tra:negate>
+                            <tra:operator>or</tra:operator>
+                            <tra:conditions xsi:type="conz:NonCodableCondition">
+                                <tra:active>true</tra:active>
+                                <conz:condition>
+                                    <com:values>
+                                        <com:value lang="ES">Sin distintivo</com:value>
+                                    </com:values>
+                                </conz:condition>
+                                <conz:type>stickerCondition</conz:type>
+                            </tra:conditions>
+                        </tra:conditions>
+                        <tra:conditions xsi:type="tra:ValidityCondition">
+                            <tra:implementedValidity>
+                                <com:validityStatus>definedByValidityTimeSpec</com:validityStatus>
+                                <com:validityTimeSpecification>
+                                    <com:overallStartTime>2026-01-15T00:00:00.000+01:00</com:overallStartTime>
+                                    <com:validPeriod>
+                                        <com:periodName>
+                                            <com:values>
+                                                <com:value lang="ES">L</com:value>
+                                            </com:values>
+                                        </com:periodName>
+                                        <com:recurringTimePeriodOfDay>
+                                            <com:startTimeOfPeriod>07:00:00Z</com:startTimeOfPeriod>
+                                            <com:endTimeOfPeriod>20:00:00Z</com:endTimeOfPeriod>
+                                        </com:recurringTimePeriodOfDay>
+                                    </com:validPeriod>
+                                </com:validityTimeSpecification>
+                            </tra:implementedValidity>
+                        </tra:conditions>
+                    </tra:condition>
+                </tra:trafficRegulation>
+            </conz:trafficRegulationOrder>
+        </conz:controlledZone>
+    </conz:controlledZoneTable>
+</payload>

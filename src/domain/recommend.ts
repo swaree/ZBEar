@@ -1,13 +1,22 @@
 import type { RoutingEngine } from "../routing/RoutingEngine";
 import type { Option, ParkingCandidate, Recommendation, TripRequest } from "./types";
+import { isInsideAnyZbe, type Zbe } from "./zbe";
+
+/** The published datasets the Recommendation reads. */
+export interface Datasets {
+  zbes: Zbe[];
+}
 
 const MAX_OPTIONS = 5;
 
 export async function recommend(
   trip: TripRequest,
-  candidates: ParkingCandidate[],
+  allCandidates: ParkingCandidate[],
+  datasets: Datasets,
   engine: RoutingEngine,
 ): Promise<Recommendation> {
+  // Parking Candidates should already be outside every ZBE; this is the safety net for Curated ones.
+  const candidates = allCandidates.filter((c) => !isInsideAnyZbe(c.location, datasets.zbes));
   const locations = candidates.map((c) => c.location);
   const [transit, drive] = await Promise.all([
     engine.transitManyToOne(locations, trip.destination, trip.arriveBy),

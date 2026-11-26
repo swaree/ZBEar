@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<payload xsi:type="conz:ControlledZoneTablePublication" xmlns:com="http://levelC/schema/3/common" xmlns:par="http://levelC/schema/3/parking" xmlns:loc="http://levelC/schema/3/locationReferencing" xmlns:ns5="http://levelC/schema/3/commonExtension" xmlns:tra="http://levelC/schema/3/trafficRegulation" xmlns:conz="http://levelC/schema/3/controlledZone" xmlns:locex="http://levelC/schema/3/locationExtension" xmlns:d2="http://levelC/schema/3/d2Payload" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <com:publicationTime>2025-03-03T11:19:44.875Z</com:publicationTime>
+    <com:publicationCreator>
+        <com:country>ES</com:country>
+        <com:nationalIdentifier>DGT</com:nationalIdentifier>
+    </com:publicationCreator>
+    <conz:controlledZoneTable>
+        <conz:controlledZone id="8096_Granollers">
+            <conz:name>
+                <com:values>
+                    <com:value lang="ES">Granollers</com:value>
+                </com:values>
+            </conz:name>
+            <conz:controlledZoneDescription>
+                <com:values>
+                    <com:value lang="ES">Cristeris d'accés i circulació de vehicles a la ZBE</com:value>
+                </com:values>
+            </conz:controlledZoneDescription>
+            <conz:controlledZoneRecordVersionTime>2025-02-10T13:55:15.573Z</conz:controlledZoneRecordVersionTime>
+            <conz:urlForFurtherInformation>https://seuelectronica.granollers.cat/portal/sede/RecursosWeb/DOCUMENTOS/1/0_7677_1.pdf</conz:urlForFurtherInformation>
+            <conz:status>active</conz:status>
+            <conz:trafficRegulationOrder>
+                <tra:trafficRegulation>
+                    <tra:typeOfRegulation xsi:type="tra:AccessRestriction">
+                        <tra:accessRestrictionType>noEntry</tra:accessRestrictionType>
+                    </tra:typeOfRegulation>
+                    <tra:condition xsi:type="tra:ConditionSet">
+                        <tra:operator>and</tra:operator>
+                        <tra:conditions xsi:type="tra:LocationCondition">
+                            <tra:implementedLocation xsi:type="loc:LocationGroupByList">
+                                <loc:locationContainedInGroup xsi:type="loc:AreaLocation">
+                                    <loc:openlrAreaLocationReference xsi:type="loc:OpenlrPolygonLocationReference">
+                                        <loc:openlrPolygonCorners>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.602875</loc:latitude>
+                                                <loc:longitude>2.2904458</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.61001</loc:latitude>
+                                                <loc:longitude>2.2907567</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.610798</loc:latitude>
+                                                <loc:longitude>2.2838738</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.61056</loc:latitude>
+                                                <loc:longitude>2.283485</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.602432</loc:latitude>
+                                                <loc:longitude>2.2828119</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.60322</loc:latitude>
+                                                <loc:longitude>2.2878351</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                            <loc:openlrCoordinates>
+                                                <loc:latitude>41.602875</loc:latitude>
+                                                <loc:longitude>2.2904458</loc:longitude>
+                                            </loc:openlrCoordinates>
+                                        </loc:openlrPolygonCorners>
+                                    </loc:openlrAreaLocationReference>
+                                </loc:locationContainedInGroup>
+                            </tra:implementedLocation>
+                        </tra:conditions>
+                        <tra:conditions xsi:type="tra:ConditionSet">
+                            <tra:negate>true</tra:negate>
+                            <tra:operator>or</tra:operator>
+                            <tra:conditions xsi:type="conz:NonCodableCondition">
+                                <tra:active>true</tra:active>
+                                <conz:condition>
+                                    <com:values>
+                                        <com:value lang="ES">Sin distintivo</com:value>
+                                    </com:values>
+                                </conz:condition>
+                                <conz:type>stickerCondition</conz:type>
+                            </tra:conditions>
+                        </tra:conditions>
+                        <tra:conditions xsi:type="tra:ValidityCondition">
+                            <tra:implementedValidity>
+                                <com:validityStatus>definedByValidityTimeSpec</com:validityStatus>
+                                <com:validityTimeSpecification>
+                                    <com:overallStartTime>2025-02-11T07:00:00.000+01:00</com:overallStartTime>
+                                    <com:validPeriod>
+                                        <com:periodName>
+                                            <com:values>
+                                                <com:value lang="ES">L</com:value>
+                                            </com:values>
+                                        </com:periodName>
+                                        <com:recurringTimePeriodOfDay>
+                                            <com:startTimeOfPeriod>07:00:00Z</com:startTimeOfPeriod>
+                                            <com:endTimeOfPeriod>20:00:00Z</com:endTimeOfPeriod>
+                                        </com:recurringTimePeriodOfDay>
+                                    </com:validPeriod>
+                                </com:validityTimeSpecification>
+                            </tra:implementedValidity>
+                        </tra:conditions>
+                    </tra:condition>
+                </tra:trafficRegulation>
+            </conz:trafficRegulationOrder>
+        </conz:controlledZone>
+    </conz:controlledZoneTable>
+</payload>

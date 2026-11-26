@@ -1,7 +1,9 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { recommend } from "../domain/recommend";
 import type { LatLng, Option, Recommendation, TripRequest } from "../domain/types";
+import type { Zbe } from "../domain/zbe";
 import { seedCandidates } from "../data/seedCandidates";
+import { loadZbeDataset } from "../data/zbeDataset";
 import { transitousEngine } from "../routing/transitous";
 import { MapView } from "./MapView";
 
@@ -9,6 +11,8 @@ import { MapView } from "./MapView";
 const TIMETABLE_HORIZON_DAYS = 3;
 
 type TapTarget = "origin" | "destination";
+
+const NO_ZBES: Zbe[] = [];
 
 export function App() {
   const engine = useMemo(() => transitousEngine(), []);
@@ -20,6 +24,20 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tapTarget, setTapTarget] = useState<TapTarget>("origin");
+  // Planning without the ZBEs could recommend parking inside one, so it waits for them.
+  const [zbes, setZbes] = useState<Zbe[] | null>(null);
+  const [zbeError, setZbeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadZbeDataset().then(
+      (dataset) => !cancelled && setZbes(dataset.zbes),
+      (err: unknown) => !cancelled && setZbeError(err instanceof Error ? err.message : String(err)),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const origin = parseLatLng(originText);
   const destination = parseLatLng(destinationText);
@@ -40,12 +58,12 @@ export function App() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!origin || !destination || !arriveBy) return;
+    if (!origin || !destination || !arriveBy || !zbes) return;
     setBusy(true);
     setError(null);
     try {
       const trip: TripRequest = { origin, destination, arriveBy };
-      const recommendation = await recommend(trip, seedCandidates, engine);
+      const recommendation = await recommend(trip, seedCandidates, { zbes }, engine);
       const fitTo = [origin, destination, ...recommendation.options.map((o) => o.candidate.location)];
       setPlanned({ trip, recommendation, fitTo });
       setSelected(recommendation.options[0]?.candidate.id ?? null);
@@ -94,8 +112,9 @@ export function App() {
             timetables yet, so Options using them may be missing.
           </p>
         )}
-        <button type="submit" disabled={!origin || !destination || !arriveBy || busy}>
-          {busy ? "Planning…" : "Find parking"}
+        {zbeError && <p className="error">Could not load the ZBEs ({zbeError}), so no Trip can be planned.</p>}
+        <button type="submit" disabled={!origin || !destination || !arriveBy || !zbes || busy}>
+          {busy ? "Planning…" : zbes ? "Find parking" : "Loading ZBEs…"}
         </button>
       </form>
 
@@ -141,6 +160,7 @@ export function App() {
           origin={origin}
           destination={destination}
           candidates={seedCandidates}
+          zbes={zbes ?? NO_ZBES}
           selectedId={selected}
           fitTo={planned?.fitTo ?? null}
           onTap={onMapTap}
@@ -150,7 +170,8 @@ export function App() {
       </section>
 
       <footer className="attribution">
-        Transit and driving times by <a href="https://transitous.org/sources/">Transitous</a> and its data sources. Map
+        ZBE perimeters from the <a href="https://nap.dgt.es/en/dataset/zonas-de-bajas-emisiones">DGT NAP</a> (CC BY
+        4.0). Transit and driving times by <a href="https://transitous.org/sources/">Transitous</a> and its data sources. Map
         data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, tiles by{" "}
         <a href="https://openfreemap.org">OpenFreeMap</a>.
       </footer>
