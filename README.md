@@ -18,7 +18,7 @@ npm run build    # typechecks the app and the Pages Functions, then builds to di
 The app reads published datasets from `public/data/`, rebuilt from their sources and committed:
 
 ```sh
-npm run data:zbes   # every ZBE in the DGT NAP DATEX II feed → public/data/zbes.json
+npm run data:zbes   # every Catalan ZBE in the DGT NAP DATEX II feed → public/data/zbes.json
 ```
 
 Restriction Windows and barred Environmental Labels come from the hand-maintained table in [src/dataset/restrictionTable.ts](src/dataset/restrictionTable.ts), not from DGT. A ZBE missing from the table is published with the worst case (all day, every day), and the build warns about it.

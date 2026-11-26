@@ -5,7 +5,7 @@ ZBEar recommends where to leave a car outside every low emission zone, and how t
 ## Zones and vehicles
 
 **ZBE**:
-A low emission zone: an area, defined by a municipality, where vehicles with certain Environmental Labels may not circulate during its Restriction Window. ZBEar considers every active ZBE, not only Barcelona's.
+A low emission zone: an area, defined by a municipality, where vehicles with certain Environmental Labels may not circulate during its Restriction Window. ZBEar considers every active ZBE in Catalonia, not only Barcelona's.
 _Avoid_: LEZ, zone, perimeter (the perimeter is the ZBE's boundary, not the ZBE)
 
 **Restriction Window**:

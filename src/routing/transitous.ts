@@ -22,7 +22,14 @@ export function transitousEngine(opts: { fetch?: typeof fetch } = {}): RoutingEn
     async transitManyToOne(many, one, arriveBy) {
       const body = await get<{ street_durations: { duration?: number }[]; transit_durations: ParetoEntry[][] }>(
         "/api/experimental/one-to-many-intermodal",
-        { one: point(one), many: points(many), time: arriveBy.toISOString(), arriveBy: "true" },
+        {
+          one: point(one),
+          many: points(many),
+          time: arriveBy.toISOString(),
+          arriveBy: "true",
+          maxPreTransitTime: String(MAX_WALK_TO_TRANSIT_S),
+          maxPostTransitTime: String(MAX_WALK_TO_TRANSIT_S),
+        },
       );
       // Walking straight to the Destination (no transit) is reported separately and can be the fastest way.
       return body.transit_durations.map((paretoSet, i) => {
@@ -46,6 +53,11 @@ export function transitousEngine(opts: { fetch?: typeof fetch } = {}): RoutingEn
 }
 
 const BASE_URL = "https://api.transitous.org";
+/**
+ * Walking allowed to the first stop and from the last one. MOTIS defaults to 15 min, which
+ * leaves a home with poor transit links (and so the Baseline) with no connection at all.
+ */
+const MAX_WALK_TO_TRANSIT_S = 45 * 60;
 
 /** One entry of a MOTIS Pareto set: the best duration achievable with this many transfers. */
 interface ParetoEntry {

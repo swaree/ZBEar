@@ -1,6 +1,7 @@
 /**
- * Dataset build, ZBE part: fetches every ZBE file of the DGT NAP DATEX II feed, applies the
- * hand-maintained Restriction Window table and writes the published dataset.
+ * Dataset build, ZBE part: fetches every ZBE file of the DGT NAP DATEX II feed, keeps the
+ * Catalan ZBEs, applies the hand-maintained Restriction Window table and writes the
+ * published dataset.
  *
  *   npm run data:zbes
  *
@@ -15,6 +16,8 @@ import { restrictionTable } from "../src/dataset/restrictionTable";
 const NAP_DATASET_PAGE = "https://nap.dgt.es/en/dataset/zonas-de-bajas-emisiones";
 const OUTPUT = new URL("../public/data/zbes.json", import.meta.url);
 const HEADERS = { "user-agent": "dataset-build" };
+/** ZBEar covers Catalonia: the INE province codes of Barcelona, Girona, Lleida and Tarragona. */
+const CATALONIA = ["08", "17", "25", "43"];
 
 async function fetchText(url: string): Promise<string> {
   const res = await fetch(url, { headers: HEADERS });
@@ -30,7 +33,12 @@ async function main() {
   const dgtFiles: string[] = [];
   for (const url of urls) dgtFiles.push(await fetchText(url)); // one at a time, to be gentle with the NAP
 
-  const { dataset, warnings } = buildZbeDataset({ dgtFiles, restrictionTable, builtAt: new Date() });
+  const { dataset, warnings } = buildZbeDataset({
+    dgtFiles,
+    restrictionTable,
+    provinces: CATALONIA,
+    builtAt: new Date(),
+  });
   for (const w of warnings) console.warn(`warning: ${w}`);
 
   await mkdir(new URL(".", OUTPUT), { recursive: true });

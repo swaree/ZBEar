@@ -263,3 +263,24 @@ a {
   color: var(--muted);
   font-size: 0.75rem;
 }
+
+.baseline {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+}
+
+.baseline strong {
+  color: var(--text);
+}
+
+.time-saved {
+  font-size: 0.9rem;
+  color: var(--accent);
+}
+
+.time-saved.slower {
+  color: var(--error);
+}

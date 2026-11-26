@@ -7,6 +7,8 @@ import sevillaCartuja from "./fixtures/dgt/SevillaCartuja.xml?raw";
 
 const MON_FRI = [1, 2, 3, 4, 5] as const;
 const builtAt = new Date("2026-11-26T12:00:00Z");
+/** INE province codes: Barcelona, Girona, Lleida, Tarragona. */
+const CATALONIA = ["08", "17", "25", "43"];
 
 /** Granollers' perimeter as written in its DGT file, [lng, lat]. */
 const GRANOLLERS_RING: [number, number][] = [
@@ -29,7 +31,7 @@ describe("ZBE dataset build", () => {
       },
     };
 
-    const { dataset } = buildZbeDataset({ dgtFiles: [granollers], restrictionTable, builtAt });
+    const { dataset } = buildZbeDataset({ dgtFiles: [granollers], restrictionTable, provinces: CATALONIA, builtAt });
 
     expect(dataset.builtAt).toBe("2026-11-26T12:00:00.000Z");
     expect(dataset.zbes).toEqual([
@@ -56,7 +58,7 @@ describe("ZBE dataset build", () => {
       },
     };
 
-    const { dataset } = buildZbeDataset({ dgtFiles: [mataro], restrictionTable, builtAt });
+    const { dataset } = buildZbeDataset({ dgtFiles: [mataro], restrictionTable, provinces: CATALONIA, builtAt });
 
     const zbe = dataset.zbes.find((z) => z.name === "ZBE Mataró");
     expect(zbe?.restrictionWindow).toEqual({ weekdays: [1, 2, 3, 4, 5, 6], start: "08:00", end: "19:00" });
@@ -64,7 +66,7 @@ describe("ZBE dataset build", () => {
   });
 
   it("publishes a ZBE missing from the table with a worst-case Restriction Window, and warns", () => {
-    const { dataset, warnings } = buildZbeDataset({ dgtFiles: [granollers], restrictionTable: {}, builtAt });
+    const { dataset, warnings } = buildZbeDataset({ dgtFiles: [granollers], restrictionTable: {}, provinces: CATALONIA, builtAt });
 
     expect(dataset.zbes.map((z) => [z.id, z.restrictionWindow, z.barredLabels])).toEqual([
       [
@@ -78,13 +80,13 @@ describe("ZBE dataset build", () => {
 
   it("leaves out ZBEs that DGT marks inactive", () => {
     // Alicante's file has the active "ZBE Alicante" and an inactive "Anillo 1 Casco Histórico".
-    const { dataset } = buildZbeDataset({ dgtFiles: [alicante], restrictionTable: {}, builtAt });
+    const { dataset } = buildZbeDataset({ dgtFiles: [alicante], restrictionTable: {}, provinces: ["03"], builtAt });
 
     expect(dataset.zbes.map((z) => z.id)).toEqual(["3014_ZBE Alicante"]);
   });
 
   it("keeps every polygon of a ZBE whose perimeter has several", () => {
-    const { dataset } = buildZbeDataset({ dgtFiles: [sevillaCartuja], restrictionTable: {}, builtAt });
+    const { dataset } = buildZbeDataset({ dgtFiles: [sevillaCartuja], restrictionTable: {}, provinces: ["41"], builtAt });
 
     expect(dataset.zbes[0]?.perimeter.coordinates).toHaveLength(2);
   });
@@ -95,7 +97,7 @@ describe("ZBE dataset build", () => {
     expect(granollers).toMatch(lastCorner);
     const openRing = granollers.replace(lastCorner, "");
 
-    const { dataset } = buildZbeDataset({ dgtFiles: [openRing], restrictionTable: {}, builtAt });
+    const { dataset } = buildZbeDataset({ dgtFiles: [openRing], restrictionTable: {}, provinces: CATALONIA, builtAt });
 
     expect(dataset.zbes[0]?.perimeter.coordinates).toEqual([[GRANOLLERS_RING]]);
   });
@@ -104,7 +106,7 @@ describe("ZBE dataset build", () => {
     // DGT has published projected (UTM) coordinates, e.g. Alicante's inactive Anillo 1.
     const projected = granollers.replace("<loc:latitude>41.61001</loc:latitude>", "<loc:latitude>4247009</loc:latitude>");
 
-    const { dataset, warnings } = buildZbeDataset({ dgtFiles: [projected], restrictionTable: {}, builtAt });
+    const { dataset, warnings } = buildZbeDataset({ dgtFiles: [projected], restrictionTable: {}, provinces: CATALONIA, builtAt });
 
     expect(dataset.zbes).toEqual([]);
     expect(warnings).toEqual([expect.stringMatching(/8096_Granollers.*latitude and longitude/)]);
@@ -124,8 +126,35 @@ describe("ZBE dataset build", () => {
       },
     };
 
-    const { warnings } = buildZbeDataset({ dgtFiles: [granollers], restrictionTable, builtAt });
+    const { warnings } = buildZbeDataset({ dgtFiles: [granollers], restrictionTable, provinces: CATALONIA, builtAt });
 
     expect(warnings).toEqual([expect.stringContaining("8096_ZBE Granollers")]);
+  });
+
+  it("publishes only the ZBEs of the given provinces", () => {
+    // DGT ids start with the INE municipality code: 8096 is Granollers (08, Barcelona), 3014 Alicante (03).
+    const { dataset, warnings } = buildZbeDataset({
+      dgtFiles: [granollers, alicante, sevillaCartuja],
+      restrictionTable: {},
+      provinces: CATALONIA,
+      builtAt,
+    });
+
+    expect(dataset.zbes.map((z) => z.id)).toEqual(["8096_Granollers"]);
+    expect(warnings).toEqual([expect.stringContaining("8096_Granollers")]);
+  });
+
+  it("publishes a ZBE whose province can't be told from its DGT id, and warns", () => {
+    const unnumbered = granollers.replace('id="8096_Granollers"', 'id="Granollers"');
+
+    const { dataset, warnings } = buildZbeDataset({
+      dgtFiles: [unnumbered],
+      restrictionTable: {},
+      provinces: CATALONIA,
+      builtAt,
+    });
+
+    expect(dataset.zbes.map((z) => z.id)).toEqual(["Granollers"]);
+    expect(warnings).toContainEqual(expect.stringMatching(/Granollers.*province/));
   });
 });

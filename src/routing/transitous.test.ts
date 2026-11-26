@@ -40,6 +40,17 @@ describe("Transitous adapter (recorded responses)", () => {
     expect(url.searchParams.get("time")).toBe("2026-12-01T08:00:00.000Z");
   });
 
+  it("allows up to 45 min of walking to the first stop and from the last one", async () => {
+    // A home with poor transit links may be a long walk from any stop; the default is 15 min.
+    const { fetchFn, calls } = recordedFetch(intermodalArriveBy);
+    const engine = transitousEngine({ fetch: fetchFn });
+
+    await engine.transitManyToOne(stations, destination, new Date("2026-12-01T09:00:00+01:00"));
+
+    expect(calls[0]!.searchParams.get("maxPreTransitTime")).toBe("2700");
+    expect(calls[0]!.searchParams.get("maxPostTransitTime")).toBe("2700");
+  });
+
   it("takes the fastest connection from each place's set of transfer alternatives", async () => {
     const { fetchFn } = recordedFetch(intermodalArriveBy);
     const engine = transitousEngine({ fetch: fetchFn });

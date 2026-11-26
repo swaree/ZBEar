@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { recommend } from "../domain/recommend";
-import type { LatLng, Option, Recommendation, TripRequest } from "../domain/types";
+import type { Baseline, LatLng, Option, Recommendation, TripRequest } from "../domain/types";
 import type { Zbe } from "../domain/zbe";
 import { seedCandidates } from "../data/seedCandidates";
 import { loadZbeDataset } from "../data/zbeDataset";
@@ -123,6 +123,7 @@ export function App() {
       {planned && (
         <section className={outdated ? "results outdated" : "results"}>
           {outdated && <p className="notice">The Origin or Destination changed since planning: press Find parking again.</p>}
+          <BaselineCard baseline={planned.recommendation.baseline} />
           {planned.recommendation.options.length === 0 ? (
             <p>No Parking Candidate can reach this Destination by that time.</p>
           ) : (
@@ -187,6 +188,7 @@ function OptionCard({ option, selected, onSelect }: { option: Option; selected: 
           <span className="option-name">{option.candidate.name}</span>
           <span className="option-total">{minutes(option.doorToDoorS)}</span>
         </div>
+        {option.timeSavedS != null && <TimeSaved seconds={option.timeSavedS} />}
         <div className="option-split">
           drive {minutes(option.driveS)} · find a space {minutes(option.timeToFindSpaceS)} · transit{" "}
           {minutes(option.transitS)} ({option.transfers} {option.transfers === 1 ? "transfer" : "transfers"})
@@ -196,6 +198,28 @@ function OptionCard({ option, selected, onSelect }: { option: Option; selected: 
         </div>
       </button>
     </li>
+  );
+}
+
+function BaselineCard({ baseline }: { baseline: Baseline | null }) {
+  if (!baseline) {
+    return <p className="baseline">Transit only, no car: no connection reaches the Destination by that time.</p>;
+  }
+  return (
+    <p className="baseline">
+      Transit only, no car: <strong>{minutes(baseline.transitS)}</strong>, leaving the Origin at{" "}
+      {clock(baseline.leaveOriginAt)} ({baseline.transfers} {baseline.transfers === 1 ? "transfer" : "transfers"})
+    </p>
+  );
+}
+
+function TimeSaved({ seconds }: { seconds: number }) {
+  const m = Math.round(seconds / 60);
+  if (m === 0) return <div className="time-saved">same as transit only</div>;
+  return m > 0 ? (
+    <div className="time-saved">{m} min faster than transit only</div>
+  ) : (
+    <div className="time-saved slower">{-m} min slower than transit only</div>
   );
 }
 

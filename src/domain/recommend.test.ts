@@ -133,4 +133,56 @@ describe("recommend", () => {
 
     expect(recommendation.options.map((o) => o.candidate.id)).toEqual(["outside"]);
   });
+
+  it("compares each Option with the Baseline: the whole Trip by transit from the Origin", async () => {
+    const fast = candidate("fast", 41.41, 3);
+    const slow = candidate("slow", 41.42, 3);
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: [
+        [fast.location, min(20)],
+        [slow.location, min(40)],
+      ],
+      transitToDestination: [
+        [fast.location, { durationS: min(30), transfers: 0 }],
+        [slow.location, { durationS: min(60), transfers: 1 }],
+        [origin, { durationS: min(90), transfers: 2 }],
+      ],
+    });
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, [fast, slow], noZbes, engine);
+
+    expect(recommendation.baseline).toEqual({
+      transitS: min(90),
+      transfers: 2,
+      leaveOriginAt: new Date("2026-12-01T07:30:00+01:00"),
+    });
+    // fast: 20 + 3 + 30 = 53 min, 37 min saved; slow: 40 + 3 + 60 = 103 min, 13 min lost.
+    expect(recommendation.options.map((o) => [o.candidate.id, o.timeSavedS])).toEqual([
+      ["fast", min(37)],
+      ["slow", -min(13)],
+    ]);
+  });
+
+  it("gives the Baseline even when no Parking Candidate works", async () => {
+    const unreachable = candidate("unreachable", 41.41, 3);
+    const engine = fakeRoutingEngine({ transitToDestination: [[origin, { durationS: min(90), transfers: 2 }]] });
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, [unreachable], noZbes, engine);
+
+    expect(recommendation.options).toEqual([]);
+    expect(recommendation.baseline?.transitS).toBe(min(90));
+  });
+
+  it("has no Baseline, and no time saved, when transit can't reach the Destination from the Origin", async () => {
+    const a = candidate("a", 41.41, 3);
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: [[a.location, min(20)]],
+      transitToDestination: [[a.location, { durationS: min(30), transfers: 0 }]],
+    });
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, [a], noZbes, engine);
+
+    expect(recommendation.baseline).toBeNull();
+    expect(recommendation.options[0]?.timeSavedS).toBeNull();
+  });
 });

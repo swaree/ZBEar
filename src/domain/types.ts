@@ -27,10 +27,21 @@ export interface Option {
   transitS: number;
   transfers: number;
   doorToDoorS: number;
+  /** Against the Baseline: positive when this Option is faster; null when there is no Baseline. */
+  timeSavedS: number | null;
   leaveOriginAt: Date;
   leaveParkingAt: Date;
 }
 
+/** The whole Trip by transit from the Origin, no car: what each Option is measured against. */
+export interface Baseline {
+  transitS: number;
+  transfers: number;
+  leaveOriginAt: Date;
+}
+
 export interface Recommendation {
   options: Option[];
+  /** Null when transit can't reach the Destination from the Origin by that time. */
+  baseline: Baseline | null;
 }

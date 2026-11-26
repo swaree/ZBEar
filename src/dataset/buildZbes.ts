@@ -11,8 +11,8 @@ export interface RestrictionTableEntry {
 export type RestrictionTable = Record<string, RestrictionTableEntry>;
 
 /**
- * The ZBE part of the dataset build: every ZBE in the DGT NAP DATEX II feed (the source of
- * truth for perimeters), with its Restriction Window and barred Environmental Labels taken
+ * The ZBE part of the dataset build: every active ZBE of the given provinces in the DGT NAP
+ * DATEX II feed (the source of truth for perimeters), with its Restriction Window and barred Environmental Labels taken
  * from the hand-maintained table. DGT's own times and label lists are ignored: the times are
  * mislabelled UTC with no weekdays, and the label lists mean "barred" in some files and
  * "allowed" in others.
@@ -20,6 +20,8 @@ export type RestrictionTable = Record<string, RestrictionTableEntry>;
 export function buildZbeDataset(input: {
   dgtFiles: string[];
   restrictionTable: RestrictionTable;
+  /** Two-digit INE province codes whose ZBEs are published, e.g. Catalonia's "08", "17", "25", "43". */
+  provinces: string[];
   builtAt: Date;
 }): { dataset: ZbeDataset; warnings: string[] } {
   const zbes: Zbe[] = [];
@@ -27,6 +29,12 @@ export function buildZbeDataset(input: {
   for (const file of input.dgtFiles) {
     for (const dgt of parseDgtZbes(file)) {
       if (dgt.status !== "active") continue;
+      const province = provinceOf(dgt.id);
+      if (province == null) {
+        warnings.push(`${dgt.id}: no INE code to tell its province; published to be safe`);
+      } else if (!input.provinces.includes(province)) {
+        continue;
+      }
       if (!dgt.polygons.every((ring) => ring.every(isLngLat))) {
         warnings.push(`${dgt.id}: perimeter is not in latitude and longitude; left out`);
         continue;
@@ -61,6 +69,12 @@ const WORST_CASE: Omit<RestrictionTableEntry, "name"> = {
   restrictionWindow: { weekdays: [1, 2, 3, 4, 5, 6, 7], start: "00:00", end: "24:00" },
   barredLabels: ENVIRONMENTAL_LABELS.filter((l) => l !== "0"),
 };
+
+/** DGT ids start with the INE municipality code, whose first two digits are the province ("8019_…" is 08019). */
+function provinceOf(dgtId: string): string | null {
+  const ine = /^(\d{4,5})_/.exec(dgtId)?.[1];
+  return ine ? ine.padStart(5, "0").slice(0, 2) : null;
+}
 
 const isLngLat = ([lng, lat]: [number, number]) => Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
 
