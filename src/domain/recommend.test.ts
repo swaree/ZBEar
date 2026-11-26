@@ -918,3 +918,241 @@ describe("recommend: Return Leg", () => {
     expect(recommendation.options[0]?.timeSavedS).toBeNull();
   });
 });
+
+describe("recommend: Direct Drive", () => {
+  it("offers Direct Drive to a Destination outside every ZBE, parking there like on the street", async () => {
+    const engine = fakeRoutingEngine({ ...trip, driveFromOrigin: [[destination, min(30)]] });
+
+    const recommendation = await recommend(trip, [], noZbes, engine);
+
+    // 30 min drive + 10 min to find a space at the Destination: leave at 08:20.
+    expect(recommendation.directDrive).toEqual({
+      driveS: min(30),
+      timeToFindSpaceS: min(10),
+      doorToDoorS: min(40),
+      timeSavedS: null,
+      leaveOriginAt: new Date("2026-12-01T08:20:00+01:00"),
+      returnLeg: null,
+      remarks: [],
+    });
+  });
+
+  it("asks for the traffic when the traveller would leave: the arrive-by time less finding a space and the free-flow drive", async () => {
+    const engine = fakeRoutingEngine({
+      ...trip,
+      driveFromOrigin: [[destination, min(30)]],
+      // Leaving at 08:20 is a 45 min drive; any other time would be far slower.
+      trafficDriveFromOrigin: [
+        [destination, (departAt) => trafficDrive(destination, departAt.getTime() === new Date("2026-12-01T08:20:00+01:00").getTime() ? 45 : 90)],
+      ],
+    });
+
+    const recommendation = await recommend(trip, [], noZbes, engine);
+
+    expect(recommendation.directDrive).toMatchObject({ driveS: min(45), leaveOriginAt: new Date("2026-12-01T08:05:00+01:00") });
+  });
+
+  it("compares Direct Drive with the Baseline over the round trip", async () => {
+    const sixPm = new Date("2026-12-01T18:00:00+01:00");
+    const engine = fakeRoutingEngine({
+      ...trip,
+      leaveDestinationAt: sixPm,
+      driveFromOrigin: [[destination, min(30)]],
+      driveToOrigin: [[destination, min(35)]],
+      transitToDestination: [[origin, { durationS: min(90), transfers: 2 }]],
+      transitFromDestination: [[origin, { durationS: min(110), transfers: 3 }]],
+    });
+
+    const recommendation = await recommend({ ...trip, return: { getBackAt: sixPm } }, [], noZbes, engine);
+
+    // Baseline 90 + 110 = 200 min; Direct Drive 30 + 10 + 35 = 75 min, 125 min saved.
+    expect(recommendation.directDrive?.timeSavedS).toBe(min(125));
+  });
+
+  it("offers no Direct Drive when the drive to the Destination can't be routed", async () => {
+    const noFreeFlow = await recommend(trip, [], noZbes, fakeRoutingEngine(trip));
+    const noTraffic = await recommend(
+      trip,
+      [],
+      noZbes,
+      fakeRoutingEngine({ ...trip, driveFromOrigin: [[destination, min(30)]], trafficDriveFromOrigin: [[destination, null]] }),
+    );
+
+    expect([noFreeFlow.directDrive, noTraffic.directDrive]).toEqual([null, null]);
+  });
+
+  /** West of the Origin, away from the straight drive to the Destination (which lies east of it). */
+  const westZbe = squareZbe("west", { lat: 41.5, lng: 1.8, side: 0.02 });
+
+  /** A Direct Drive of 30 min whose first 10 min cross the west ZBE. */
+  function throughWest(plannedTrip: typeof trip) {
+    return fakeRoutingEngine({
+      ...plannedTrip,
+      driveFromOrigin: [[destination, min(30)]],
+      trafficDriveFromOrigin: [[destination, trafficDrive(destination, 30, [41.53, 1.81, 2], [41.49, 1.81, 10])]],
+    });
+  }
+
+  it("offers no Direct Drive when the drive to the Destination is inside a ZBE during its Restriction Window", async () => {
+    // Leaves at 08:20 on a Tuesday, through the west ZBE until about 08:30.
+    const recommendation = await recommend(trip, [], { zbes: [westZbe] }, throughWest(trip));
+
+    expect(recommendation.directDrive).toBeNull();
+  });
+
+  it("offers Direct Drive through a ZBE outside its Restriction Window", async () => {
+    const saturday = { ...trip, arriveBy: new Date("2026-12-05T09:00:00+01:00") };
+
+    const recommendation = await recommend(saturday, [], { zbes: [westZbe] }, throughWest(saturday));
+
+    expect(recommendation.directDrive?.leaveOriginAt).toEqual(new Date("2026-12-05T08:20:00+01:00"));
+  });
+
+  describe("with a return", () => {
+    const sixPm = new Date("2026-12-01T18:00:00+01:00");
+    const roundTrip = { ...trip, return: { getBackAt: sixPm } };
+
+    /** Direct Drive there in 30 min, and back in 35 min along `back` when given, else in a straight line. */
+    function roundTripEngine(back?: TrafficDrive) {
+      return fakeRoutingEngine({
+        ...trip,
+        leaveDestinationAt: sixPm,
+        driveFromOrigin: [[destination, min(30)]],
+        driveToOrigin: [[destination, min(35)]],
+        trafficDriveToOrigin: back ? [[destination, back]] : [],
+      });
+    }
+
+    /** A 35 min drive back to the Origin whose first 10 min cross the west ZBE. */
+    const backThroughWest: TrafficDrive = {
+      durationS: min(35),
+      distanceM: 40_000,
+      path: [
+        { ...destination, atS: 0 },
+        { lat: 41.49, lng: 1.81, atS: min(2) },
+        { lat: 41.53, lng: 1.81, atS: min(10) },
+        { ...origin, atS: min(35) },
+      ],
+    };
+
+    it("offers Direct Drive both ways when the drive back is legal too, leaving the Destination at Get back at", async () => {
+      const recommendation = await recommend(roundTrip, [], { zbes: [westZbe] }, roundTripEngine());
+
+      expect(recommendation.directDrive).toMatchObject({
+        doorToDoorS: min(30 + 10 + 35),
+        returnLeg: {
+          driveS: min(35),
+          leaveDestinationAt: sixPm,
+          arriveOriginAt: new Date("2026-12-01T18:35:00+01:00"),
+        },
+        remarks: [],
+      });
+    });
+
+    it("offers no Direct Drive when the drive back is inside a ZBE during its Restriction Window", async () => {
+      // Back on the road at 18:00, through the west ZBE until about 18:10.
+      const recommendation = await recommend(roundTrip, [], { zbes: [westZbe] }, roundTripEngine(backThroughWest));
+
+      expect(recommendation.directDrive).toBeNull();
+    });
+
+    it("judges the drive back by when it is driven", async () => {
+      // Back on the road at 20:30, after the Restriction Window (07:00–20:00) has ended.
+      const halfEight = new Date("2026-12-01T20:30:00+01:00");
+      const engine = fakeRoutingEngine({
+        ...trip,
+        leaveDestinationAt: halfEight,
+        driveFromOrigin: [[destination, min(30)]],
+        trafficDriveToOrigin: [[destination, backThroughWest]],
+      });
+
+      const recommendation = await recommend({ ...trip, return: { getBackAt: halfEight } }, [], { zbes: [westZbe] }, engine);
+
+      expect(recommendation.directDrive?.returnLeg?.arriveOriginAt).toEqual(new Date("2026-12-01T21:05:00+01:00"));
+    });
+
+    it("offers no Direct Drive when the Destination can't be driven back from", async () => {
+      const engine = fakeRoutingEngine({ ...trip, leaveDestinationAt: sixPm, driveFromOrigin: [[destination, min(30)]] });
+
+      const recommendation = await recommend(roundTrip, [], noZbes, engine);
+
+      expect(recommendation.directDrive).toBeNull();
+    });
+  });
+
+  describe("with no return", () => {
+    /** A ZBE around the Destination; the straight drive from the Origin enters it in its last minutes. */
+    const aroundDestination = squareZbe("barcelona", { lat: 41.36, lng: 2.12, side: 0.06 });
+    const straightThere = (plannedTrip: typeof trip) =>
+      fakeRoutingEngine({ ...plannedTrip, driveFromOrigin: [[destination, min(30)]] });
+
+    it("says Direct Drive is valid only when leaving after the next Restriction Window, or out of the ZBE before it starts", async () => {
+      // In before 07:00 on a Tuesday, so the car can't leave again until 20:00.
+      const early = { ...trip, arriveBy: new Date("2026-12-01T06:45:00+01:00") };
+
+      const recommendation = await recommend(early, [], { zbes: [aroundDestination] }, straightThere(early));
+
+      expect(recommendation.directDrive?.remarks).toEqual([
+        {
+          kind: "leave-outside-restriction",
+          zbeNames: ["ZBE barcelona"],
+          restrictedFrom: new Date("2026-12-01T07:00:00+01:00"),
+          restrictedUntil: new Date("2026-12-01T20:00:00+01:00"),
+        },
+      ]);
+    });
+
+    it("counts finding a space at a Destination inside a ZBE as driving inside it", async () => {
+      // The drive ends at 06:55, but finding a space runs on to 07:05, into the Restriction Window.
+      const justAfterSeven = { ...trip, arriveBy: new Date("2026-12-01T07:05:00+01:00") };
+
+      const recommendation = await recommend(justAfterSeven, [], { zbes: [aroundDestination] }, straightThere(justAfterSeven));
+
+      expect(recommendation.directDrive).toBeNull();
+    });
+
+    it("looks ahead to the next day the Restriction Window applies", async () => {
+      // Friday evening, after the window: the next one is Monday's.
+      const fridayNight = { ...trip, arriveBy: new Date("2026-12-04T21:00:00+01:00") };
+
+      const recommendation = await recommend(fridayNight, [], { zbes: [aroundDestination] }, straightThere(fridayNight));
+
+      expect(recommendation.directDrive?.remarks).toMatchObject([
+        {
+          restrictedFrom: new Date("2026-12-07T07:00:00+01:00"),
+          restrictedUntil: new Date("2026-12-07T20:00:00+01:00"),
+        },
+      ]);
+    });
+
+    it("joins the Restriction Windows of every ZBE the drive passes through", async () => {
+      // The west ZBE, restricted 08:00–21:00, on the way; the Destination's, 07:00–20:00.
+      const lateWest: Zbe = { ...westZbe, restrictionWindow: { weekdays: [1, 2, 3, 4, 5], start: "08:00", end: "21:00" } };
+      const early = { ...trip, arriveBy: new Date("2026-12-01T06:45:00+01:00") };
+      const engine = fakeRoutingEngine({
+        ...early,
+        driveFromOrigin: [[destination, min(30)]],
+        trafficDriveFromOrigin: [[destination, trafficDrive(destination, 30, [41.53, 1.81, 2], [41.49, 1.81, 10])]],
+      });
+
+      const recommendation = await recommend(early, [], { zbes: [lateWest, aroundDestination] }, engine);
+
+      expect(recommendation.directDrive?.remarks).toEqual([
+        {
+          kind: "leave-outside-restriction",
+          zbeNames: ["ZBE west", "ZBE barcelona"],
+          restrictedFrom: new Date("2026-12-01T07:00:00+01:00"),
+          restrictedUntil: new Date("2026-12-01T21:00:00+01:00"),
+        },
+      ]);
+    });
+
+    it("needs no Remark when the drive passes through no ZBE that bars the car", async () => {
+      const early = { ...trip, arriveBy: new Date("2026-12-01T06:45:00+01:00"), vehicleLabel: "B" as const };
+
+      const recommendation = await recommend(early, [], { zbes: [aroundDestination] }, straightThere(early));
+
+      expect(recommendation.directDrive?.remarks).toEqual([]);
+    });
+  });
+});

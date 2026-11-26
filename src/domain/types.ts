@@ -108,8 +108,42 @@ export interface Baseline {
   returnLeg: { transitS: number; transfers: number; arriveOriginAt: Date } | null;
 }
 
+/** Driving straight to the Destination and parking there, offered only when no part of the Trip drives inside a ZBE during its Restriction Window. */
+export interface DirectDrive {
+  /** The drive from the Origin to the Destination, with traffic. */
+  driveS: number;
+  /** Parking at the Destination is unknown, so it takes as long as on the street. */
+  timeToFindSpaceS: number;
+  /** The Outbound Leg's drive and finding a space, plus the drive back when the Trip has a return. */
+  doorToDoorS: number;
+  /** Against the Baseline: positive when Direct Drive is faster; null when there is no Baseline. */
+  timeSavedS: number | null;
+  leaveOriginAt: Date;
+  /** The drive back from the Destination to the Origin; null when the Trip has no return. */
+  returnLeg: { driveS: number; leaveDestinationAt: Date; arriveOriginAt: Date } | null;
+  remarks: Remark[];
+}
+
+/** A notable fact about an Option that the score leaves out. */
+export type Remark = LeaveOutsideRestrictionRemark;
+
+/**
+ * With no return given, Direct Drive is valid only if the car leaves the Destination outside the next
+ * Restriction Window of the ZBEs its drive passes through: out of them before it starts, or after it ends.
+ */
+export interface LeaveOutsideRestrictionRemark {
+  kind: "leave-outside-restriction";
+  zbeNames: string[];
+  /** When the next Restriction Window starts, or the arrival when it already applies then. */
+  restrictedFrom: Date;
+  /** When it ends; null when it doesn't end within eight days (a week, plus a day of slack). */
+  restrictedUntil: Date | null;
+}
+
 export interface Recommendation {
   options: Option[];
+  /** Null when driving straight to the Destination, or back, would be inside a ZBE during its Restriction Window, or can't be routed. */
+  directDrive: DirectDrive | null;
   /** Null when transit can't reach the Destination from the Origin by that time, or can't bring the traveller back. */
   baseline: Baseline | null;
 }

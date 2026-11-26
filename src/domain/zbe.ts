@@ -100,6 +100,38 @@ export function isDriveIllegal(path: TimedPosition[], zbes: Zbe[], label: Enviro
   );
 }
 
+/**
+ * The ZBEs that bar the vehicle's Environmental Label and that a drive along `path` is inside at some point,
+ * off their Exempt Corridors, whether or not during their Restriction Windows.
+ */
+export function zbesDrivenThrough(path: TimedPosition[], zbes: Zbe[], label: EnvironmentalLabel): Zbe[] {
+  return zbes.filter((zbe) => zbe.barredLabels.includes(label) && stretchesInside(path, zbe).length > 0);
+}
+
+/** How far ahead `nextRestriction` looks: a week covers every recurring Restriction Window, plus a day of slack. */
+const RESTRICTION_LOOKAHEAD_MS = 8 * 86_400_000;
+
+/**
+ * The first span, at or after `after`, during which any of the ZBEs' Restriction Windows applies, with
+ * windows that overlap or touch joined into one span. `until` is null when the span doesn't end within
+ * the lookahead; the whole result is null when no window applies within it.
+ */
+export function nextRestriction(zbes: Zbe[], after: number): { from: number; until: number | null } | null {
+  const restrictedAt = (at: number) => {
+    const local = localTimeOf(at);
+    return zbes.some((zbe) => isInWindow(local, zbe.restrictionWindow));
+  };
+  let from: number | null = restrictedAt(after) ? after : null;
+  for (let at = Math.ceil(after / MINUTE_MS) * MINUTE_MS; from == null; at += MINUTE_MS) {
+    if (at > after + RESTRICTION_LOOKAHEAD_MS) return null;
+    if (restrictedAt(at)) from = at;
+  }
+  for (let at = Math.floor(from / MINUTE_MS) * MINUTE_MS + MINUTE_MS; at <= from + RESTRICTION_LOOKAHEAD_MS; at += MINUTE_MS) {
+    if (!restrictedAt(at)) return { from, until: at };
+  }
+  return { from, until: null };
+}
+
 interface Stretch {
   from: number;
   to: number;
@@ -324,9 +356,21 @@ const MADRID_TIME = new Intl.DateTimeFormat("en-GB", {
 });
 const WEEKDAYS: Record<string, Weekday> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
 
-function isInRestrictionWindow(at: number, { weekdays, start, end }: RestrictionWindow): boolean {
+/** A moment in local Europe/Madrid time: its weekday and its "HH:MM". */
+interface LocalTime {
+  weekday: Weekday | undefined;
+  time: string;
+}
+
+function localTimeOf(at: number): LocalTime {
   const parts = Object.fromEntries(MADRID_TIME.formatToParts(at).map((p) => [p.type, p.value]));
-  const weekday = WEEKDAYS[parts.weekday ?? ""];
-  const time = `${parts.hour}:${parts.minute}`;
+  return { weekday: WEEKDAYS[parts.weekday ?? ""], time: `${parts.hour}:${parts.minute}` };
+}
+
+function isInWindow({ weekday, time }: LocalTime, { weekdays, start, end }: RestrictionWindow): boolean {
   return weekday != null && weekdays.includes(weekday) && start <= time && time < end;
+}
+
+function isInRestrictionWindow(at: number, window: RestrictionWindow): boolean {
+  return isInWindow(localTimeOf(at), window);
 }

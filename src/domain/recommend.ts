@@ -1,7 +1,8 @@
 import type { RoutingEngine, TrafficDrive, TransitDuration } from "../routing/RoutingEngine";
 import { distanceM } from "./geo";
-import type { Baseline, Option, OptionReturnLeg, ParkingCandidate, Recommendation, TripRequest } from "./types";
-import { isDriveIllegal, isInsideAnyZbe, type Zbe } from "./zbe";
+import { DEFAULT_TIME_TO_FIND_SPACE_S } from "./parking";
+import type { Baseline, DirectDrive, Option, OptionReturnLeg, ParkingCandidate, Recommendation, Remark, TripRequest } from "./types";
+import { isDriveIllegal, isInsideAnyZbe, nextRestriction, zbesDrivenThrough, type Zbe } from "./zbe";
 
 /** The published datasets the Recommendation reads. */
 export interface Datasets {
@@ -19,7 +20,8 @@ export interface RecommendSettings {
   maxDetourRatio: number;
   /**
    * At most this many Parking Candidates are routed, those with the smallest detours. Transitous
-   * fair use allows 128 points per one-to-many call, and the Origin rides along in one of them.
+   * fair use allows 128 points per one-to-many call, and the Origin (in the transit calls) or the
+   * Destination (in the free-flow drive from the Origin) rides along.
    */
   maxRoutedCandidates: number;
   /**
@@ -57,13 +59,16 @@ export async function recommend(
   const locations = candidates.map((c) => c.location);
   const leaveDestinationAt = returnStartsAt(trip);
   // The Origin rides along in the candidates' transit calls: that gives the Baseline for free.
-  const [transitWithOrigin, drive, returnTransitWithOrigin, returnDrive] = await Promise.all([
+  // And the Destination rides along in the free-flow drives, for Direct Drive.
+  const [transitWithOrigin, driveWithDestination, returnTransitWithOrigin, returnDrive] = await Promise.all([
     engine.transitManyToOne([...locations, trip.origin], trip.destination, trip.arriveBy),
-    engine.driveFreeFlowOneToMany(trip.origin, locations),
+    engine.driveFreeFlowOneToMany(trip.origin, [...locations, trip.destination]),
     leaveDestinationAt && engine.transitOneToMany(trip.destination, [...locations, trip.origin], leaveDestinationAt),
     leaveDestinationAt && engine.driveFreeFlowManyToOne(locations, trip.origin),
   ]);
   const transit = transitWithOrigin.slice(0, locations.length);
+  const drive = driveWithDestination.slice(0, locations.length);
+  const directDriveFreeFlowS = driveWithDestination[locations.length] ?? null;
   const returnTransit = returnTransitWithOrigin && returnTransitWithOrigin.slice(0, locations.length);
   const baseline = baselineOf(
     trip,
@@ -88,9 +93,22 @@ export async function recommend(
     .sort((a, b) => a.scoreS - b.scoreS)
     .slice(0, trafficPassSize);
 
+  const atArrival = trip.arriveBy.getTime();
+  // Direct Drive's drives with traffic run alongside the traffic pass: there, departing when the free-flow
+  // drive says to, and back, departing when the traveller leaves the Destination.
+  const directDrives: Promise<[TrafficDrive | null, TrafficDrive | null]> =
+    directDriveFreeFlowS == null
+      ? Promise.resolve([null, null])
+      : Promise.all([
+          engine.driveWithTraffic(
+            trip.origin,
+            trip.destination,
+            new Date(atArrival - (directDriveFreeFlowS + DIRECT_DRIVE_TIME_TO_FIND_SPACE_S) * 1000),
+          ),
+          leaveDestinationAt ? engine.driveWithTraffic(trip.destination, trip.origin, leaveDestinationAt) : null,
+        ]);
   // Traffic pass: the drive from the Origin, departing when the free-flow drive says to, and the drive
   // back, departing when the return transit reaches the parking.
-  const atArrival = trip.arriveBy.getTime();
   const trafficPass = await Promise.all(
     firstPass.map(async ({ candidate, transitThere, outboundS, transitBack }) => {
       const back =
@@ -131,7 +149,7 @@ export async function recommend(
       transitS: transitThere.durationS,
       transfers: transitThere.transfers,
       doorToDoorS,
-      timeSavedS: baseline ? baseline.transitS + (baseline.returnLeg?.transitS ?? 0) - doorToDoorS : null,
+      timeSavedS: timeSavedAgainst(baseline, doorToDoorS),
       leaveOriginAt: new Date(leaveOriginAt),
       leaveParkingAt: new Date(atArrival - transitThere.durationS * 1000),
       returnLeg,
@@ -139,7 +157,75 @@ export async function recommend(
   }
 
   options.sort((x, y) => x.doorToDoorS - y.doorToDoorS);
-  return { options: options.slice(0, MAX_OPTIONS), baseline };
+  const [directDriveThere, directDriveBack] = await directDrives;
+  const directDrive = directDriveOf(
+    trip,
+    directDriveThere,
+    leaveDestinationAt && { departAt: leaveDestinationAt, drive: directDriveBack },
+    datasets.zbes,
+    baseline,
+  );
+  return { options: options.slice(0, MAX_OPTIONS), directDrive, baseline };
+}
+
+/** Parking at the Destination is unknown, so Direct Drive takes as long to find a space as on the street. */
+const DIRECT_DRIVE_TIME_TO_FIND_SPACE_S = DEFAULT_TIME_TO_FIND_SPACE_S.street;
+
+/**
+ * Direct Drive from its drives with traffic, there and (when the Trip has a return) back: null unless
+ * every drive was routed and is legal.
+ */
+function directDriveOf(
+  trip: TripRequest,
+  driveThere: TrafficDrive | null,
+  back: { departAt: Date; drive: TrafficDrive | null } | null,
+  zbes: Zbe[],
+  baseline: Baseline | null,
+): DirectDrive | null {
+  if (!driveThere) return null;
+  const label = trip.vehicleLabel ?? "none";
+  const outboundS = driveThere.durationS + DIRECT_DRIVE_TIME_TO_FIND_SPACE_S;
+  const leaveOriginAt = trip.arriveBy.getTime() - outboundS * 1000;
+  // Finding a space is driving too: around the Destination, until the arrive-by time.
+  const there = [...timed(driveThere, leaveOriginAt), { ...trip.destination, at: trip.arriveBy.getTime() }];
+  if (isDriveIllegal(there, zbes, label)) return null;
+  if (back && (!back.drive || isDriveIllegal(timed(back.drive, back.departAt.getTime()), zbes, label))) return null;
+  const returnLeg = back?.drive
+    ? {
+        driveS: back.drive.durationS,
+        leaveDestinationAt: back.departAt,
+        arriveOriginAt: new Date(back.departAt.getTime() + back.drive.durationS * 1000),
+      }
+    : null;
+  const doorToDoorS = outboundS + (returnLeg?.driveS ?? 0);
+  const remarks: Remark[] = [];
+  if (!back) {
+    // The way back is unknown, so it is taken to pass through the ZBEs the way there does.
+    const drivenThrough = zbesDrivenThrough(there, zbes, label);
+    const restriction = drivenThrough.length > 0 ? nextRestriction(drivenThrough, trip.arriveBy.getTime()) : null;
+    if (restriction) {
+      remarks.push({
+        kind: "leave-outside-restriction",
+        zbeNames: drivenThrough.map((zbe) => zbe.name),
+        restrictedFrom: new Date(restriction.from),
+        restrictedUntil: restriction.until == null ? null : new Date(restriction.until),
+      });
+    }
+  }
+  return {
+    driveS: driveThere.durationS,
+    timeToFindSpaceS: DIRECT_DRIVE_TIME_TO_FIND_SPACE_S,
+    doorToDoorS,
+    timeSavedS: timeSavedAgainst(baseline, doorToDoorS),
+    leaveOriginAt: new Date(leaveOriginAt),
+    returnLeg,
+    remarks,
+  };
+}
+
+/** Positive when faster than the Baseline, both ways when it has a return; null when there is no Baseline. */
+function timeSavedAgainst(baseline: Baseline | null, doorToDoorS: number): number | null {
+  return baseline ? baseline.transitS + (baseline.returnLeg?.transitS ?? 0) - doorToDoorS : null;
 }
 
 /** A Parking Candidate's free-flow door-to-door time, both ways when the Trip has a Return Leg. */

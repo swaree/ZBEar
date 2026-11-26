@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { recommend, returnStartsAt } from "../domain/recommend";
-import type { Baseline, LatLng, Option, ParkingCandidate, Recommendation, TripRequest, TripReturn } from "../domain/types";
+import type {
+  Baseline,
+  DirectDrive,
+  LatLng,
+  Option,
+  ParkingCandidate,
+  Recommendation,
+  Remark,
+  TripRequest,
+  TripReturn,
+} from "../domain/types";
 import { ENVIRONMENTAL_LABELS, type EnvironmentalLabel, type Zbe } from "../domain/zbe";
 import { loadDiscoveredParkingCandidates } from "../data/parkingCandidates";
 import { loadZbeDataset } from "../data/zbeDataset";
@@ -236,6 +246,9 @@ export function App() {
             </p>
           )}
           <BaselineCard baseline={planned.recommendation.baseline} trip={planned.trip} />
+          {planned.recommendation.directDrive && (
+            <DirectDriveCard directDrive={planned.recommendation.directDrive} trip={planned.trip} />
+          )}
           {planned.recommendation.options.length === 0 ? (
             <p>
               No Parking Candidate can reach this Destination by that time{planned.trip.return ? ", and back," : ""}{" "}
@@ -335,6 +348,43 @@ function OptionCard({ option, selected, onSelect }: { option: Option; selected: 
   );
 }
 
+function DirectDriveCard({ directDrive, trip }: { directDrive: DirectDrive; trip: TripRequest }) {
+  const back = directDrive.returnLeg;
+  return (
+    <div className="direct-drive">
+      <div className="option-head">
+        <span className="option-name">Direct Drive</span>
+        <span className="option-total">
+          {minutes(directDrive.doorToDoorS)}
+          {back && <span className="hint"> round trip</span>}
+        </span>
+      </div>
+      {directDrive.timeSavedS != null && <TimeSaved seconds={directDrive.timeSavedS} />}
+      <div className="option-split">
+        Never inside a ZBE while it bars the car{back ? ", there or back" : ""}: drive {minutes(directDrive.driveS)} · find a space{" "}
+        {minutes(directDrive.timeToFindSpaceS)}
+        {back && <> · drive back {minutes(back.driveS)}</>}
+      </div>
+      <div className="option-times">
+        Leave the Origin at {clock(directDrive.leaveOriginAt)}
+        {back && <> · at the Origin again at {clock(back.arriveOriginAt)}</>}
+      </div>
+      {directDrive.remarks.map((remark) => (
+        <p key={remark.kind} className="notice">
+          {remarkText(remark, trip.arriveBy)}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function remarkText(remark: Remark, arrival: Date): string {
+  const zbes = remark.zbeNames.join(", ");
+  const outBy = remark.restrictedFrom > arrival ? `are out of ${zbes} by ${dayClock(remark.restrictedFrom, arrival)}` : null;
+  const leaveAfter = remark.restrictedUntil && `leave after ${dayClock(remark.restrictedUntil, arrival)}`;
+  return `Only valid if you ${[leaveAfter, outBy].filter(Boolean).join(", or ") || `never drive out of ${zbes}`}.`;
+}
+
 function BaselineCard({ baseline, trip }: { baseline: Baseline | null; trip: TripRequest }) {
   const link = (
     <a href={googleMapsTransitUrl(trip.origin, trip.destination)} target="_blank" rel="noopener noreferrer">
@@ -408,6 +458,12 @@ const formatLatLng = (p: LatLng) => `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
 const minutes = (s: number) => `${Math.round(s / 60)} min`;
 const transfers = (n: number) => `${n} ${n === 1 ? "transfer" : "transfers"}`;
 const clock = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+/** A clock time, after the weekday when it isn't the same day as `reference`: "20:00" or "Mon 20:00". */
+function dayClock(d: Date, reference: Date): string {
+  if (d.toDateString() === reference.toDateString()) return clock(d);
+  return `${d.toLocaleDateString([], { weekday: "short" })} ${clock(d)}`;
+}
 
 /** A clock time, with the day when it isn't the same day as `reference`. */
 function dayAndClock(d: Date, reference: Date): string {
