@@ -71,7 +71,7 @@ export async function recommend(
     leaveDestinationAt && { leaveDestinationAt, transit: returnTransitWithOrigin?.[locations.length] ?? null },
   );
 
-  // First pass: free-flow drive times, for every routed candidate. With a return time, a candidate
+  // First pass: free-flow drive times, for every routed candidate. With a return, a candidate
   // must be reachable both ways.
   const firstPass = candidates
     .flatMap((candidate, i): FirstPassEntry[] => {
@@ -152,10 +152,11 @@ interface FirstPassEntry {
   scoreS: number;
 }
 
-/** When the Return Leg leaves the Destination: null when the Trip has no return time. */
-export function returnStartsAt({ arriveBy, returnTime }: Pick<TripRequest, "arriveBy" | "returnTime">): Date | null {
-  if (!returnTime) return null;
-  return "at" in returnTime ? returnTime.at : new Date(arriveBy.getTime() + returnTime.stayS * 1000);
+/** When the Return Leg leaves the Destination: null when the Trip has no return. */
+export function returnStartsAt(trip: Pick<TripRequest, "arriveBy" | "return">): Date | null {
+  const back = trip.return;
+  if (!back) return null;
+  return "getBackAt" in back ? back.getBackAt : new Date(trip.arriveBy.getTime() + back.stayForS * 1000);
 }
 
 /** A drive's path with the clock time the car passes each point, given when the drive departs. */

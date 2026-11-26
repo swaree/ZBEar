@@ -46,6 +46,14 @@ Origin → Parking Candidate by car, then Parking Candidate → Destination by t
 **Return Leg**:
 Destination → Parking Candidate by transit, then Parking Candidate → Origin by car. Its transit part need not mirror the Outbound Leg's.
 
+**Get back at**:
+One way to give a Trip's return: the time the traveller leaves the Destination, which starts the Return Leg. It is not the time they are back at the Origin.
+_Avoid_: return time, leave at
+
+**Stay for**:
+The other way to give a Trip's return: how long the traveller stays at the Destination, counted from the arrive-by time. The Return Leg starts when the stay ends.
+_Avoid_: return time, duration
+
 ## Recommendations
 
 **Parking Candidate**:

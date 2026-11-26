@@ -655,10 +655,10 @@ describe("recommend: Exempt Corridors", () => {
 describe("recommend: Return Leg", () => {
   const sixPm = new Date("2026-12-01T18:00:00+01:00");
   /** The usual Trip, back from the Destination at 18:00. */
-  const roundTrip = { ...trip, returnTime: { at: sixPm } };
+  const roundTrip = { ...trip, return: { getBackAt: sixPm } };
   const returnFake = { ...trip, leaveDestinationAt: sixPm };
 
-  it("ranks Options by outbound plus return door-to-door time when a return time is given", async () => {
+  it("ranks Options by outbound plus return door-to-door time when the Trip has a return", async () => {
     // Quick in the morning but a slow bus back in the evening.
     const morning = candidate("morning", 41.41, 3);
     const evening = candidate("evening", 41.42, 3);
@@ -711,7 +711,7 @@ describe("recommend: Return Leg", () => {
     });
   }
 
-  it("works forward from the return time to when the drive back starts and the Origin is reached", async () => {
+  it("works forward from Get back at to when the drive back starts and the Origin is reached", async () => {
     const a = candidate("a", 41.41, 3);
 
     const [option] = (await recommend(roundTrip, [a], noZbes, simpleRoundTrip(a))).options;
@@ -725,18 +725,18 @@ describe("recommend: Return Leg", () => {
     });
   });
 
-  it("takes the return as a stay at the Destination, counted from the arrive-by time", async () => {
+  it("takes Stay for as a stay at the Destination, counted from the arrive-by time", async () => {
     const a = candidate("a", 41.41, 3);
 
     // Due at 09:00 and staying 9 hours: back from the Destination at 18:00.
-    const recommendation = await recommend({ ...trip, returnTime: { stayS: min(9 * 60) } }, [a], noZbes, simpleRoundTrip(a));
+    const recommendation = await recommend({ ...trip, return: { stayForS: min(9 * 60) } }, [a], noZbes, simpleRoundTrip(a));
 
     expect(recommendation.options.map((o) => [o.candidate.id, o.doorToDoorS / 60, o.returnLeg?.arriveOriginAt])).toEqual([
       ["a", 118, new Date("2026-12-01T19:05:00+01:00")],
     ]);
   });
 
-  it("has no Return Leg without a return time", async () => {
+  it("has no Return Leg when the Trip has no return", async () => {
     const a = candidate("a", 41.41, 3);
     const engine = fakeRoutingEngine({
       ...trip,
@@ -803,7 +803,7 @@ describe("recommend: Return Leg", () => {
     const halfEight = new Date("2026-12-01T20:30:00+01:00");
     const { all, engine } = oneDrivesBackThroughTheZbe(halfEight);
 
-    const recommendation = await recommend({ ...trip, returnTime: { at: halfEight } }, all, { zbes: [westZbe] }, engine);
+    const recommendation = await recommend({ ...trip, return: { getBackAt: halfEight } }, all, { zbes: [westZbe] }, engine);
 
     expect(recommendation.options.map((o) => o.candidate.id)).toEqual(["through", "clean"]);
   });

@@ -60,14 +60,14 @@ export interface TripRequest {
   /** The vehicle's Environmental Label, which decides the ZBEs that bar it. Defaults to none. */
   vehicleLabel?: EnvironmentalLabel;
   /** When the traveller leaves the Destination again. Without it the Trip has no Return Leg to plan. */
-  returnTime?: ReturnTime;
+  return?: TripReturn;
 }
 
 /**
- * When the Return Leg starts from the Destination: at a given time, or after a stay there counted from
- * the arrive-by time.
+ * When the Return Leg leaves the Destination: Get back at a given time, or Stay for a while there,
+ * counted from the arrive-by time.
  */
-export type ReturnTime = { at: Date } | { stayS: number };
+export type TripReturn = { getBackAt: Date } | { stayForS: number };
 
 /** One Parking Candidate evaluated for a specific Trip. */
 export interface Option {
@@ -84,7 +84,7 @@ export interface Option {
   leaveOriginAt: Date;
   /** When to leave the parking for the transit to the Destination. */
   leaveParkingAt: Date;
-  /** Null when the Trip has no return time. */
+  /** Null when the Trip has no return. */
   returnLeg: OptionReturnLeg | null;
 }
 
@@ -104,7 +104,7 @@ export interface Baseline {
   transitS: number;
   transfers: number;
   leaveOriginAt: Date;
-  /** Transit from the Destination back to the Origin, leaving at the return time; null with no return time. */
+  /** Transit from the Destination back to the Origin, leaving when the Return Leg does; null with no return. */
   returnLeg: { transitS: number; transfers: number; arriveOriginAt: Date } | null;
 }
 
