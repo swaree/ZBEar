@@ -9,7 +9,7 @@ import type { RoutingEngine, TransitDuration } from "./RoutingEngine";
  */
 export function transitousEngine(
   opts: { fetch?: typeof fetch } = {},
-): Pick<RoutingEngine, "transitManyToOne" | "driveFreeFlowOneToMany"> {
+): Pick<RoutingEngine, "transitManyToOne" | "transitOneToMany" | "driveFreeFlowOneToMany" | "driveFreeFlowManyToOne"> {
   const fetchFn = opts.fetch ?? ((...args) => fetch(...args));
 
   async function get<T>(path: string, params: Record<string, string>): Promise<T> {
@@ -20,37 +20,44 @@ export function transitousEngine(
     return (await res.json()) as T;
   }
 
-  return {
-    async transitManyToOne(many, one, arriveBy) {
-      const body = await get<{ street_durations: { duration?: number }[]; transit_durations: ParetoEntry[][] }>(
-        "/api/experimental/one-to-many-intermodal",
-        {
-          one: point(one),
-          many: points(many),
-          time: arriveBy.toISOString(),
-          arriveBy: "true",
-          maxPreTransitTime: String(MAX_WALK_TO_TRANSIT_S),
-          maxPostTransitTime: String(MAX_WALK_TO_TRANSIT_S),
-        },
-      );
-      // Walking straight to the Destination (no transit) is reported separately and can be the fastest way.
-      return body.transit_durations.map((paretoSet, i) => {
-        const walk = body.street_durations[i]?.duration;
-        return fastest(walk == null ? paretoSet : [...paretoSet, { duration: walk, transfers: 0 }]);
-      });
-    },
-
-    async driveFreeFlowOneToMany(one, many) {
-      const body = await get<{ duration?: number }[]>("/api/v1/one-to-many", {
+  /** Transit between `one` and each of `many`: towards `one` arriving by `time`, or away from it leaving at `time`. */
+  async function transit(one: LatLng, many: LatLng[], time: Date, arriveBy: boolean) {
+    const body = await get<{ street_durations: { duration?: number }[]; transit_durations: ParetoEntry[][] }>(
+      "/api/experimental/one-to-many-intermodal",
+      {
         one: point(one),
         many: points(many),
-        mode: "CAR",
-        max: String(3 * 3600),
-        maxMatchingDistance: "250",
-        arriveBy: "false",
-      });
-      return body.map((d) => d.duration ?? null);
-    },
+        time: time.toISOString(),
+        arriveBy: String(arriveBy),
+        maxPreTransitTime: String(MAX_WALK_TO_TRANSIT_S),
+        maxPostTransitTime: String(MAX_WALK_TO_TRANSIT_S),
+      },
+    );
+    // Walking straight there (no transit) is reported separately and can be the fastest way.
+    return body.transit_durations.map((paretoSet, i) => {
+      const walk = body.street_durations[i]?.duration;
+      return fastest(walk == null ? paretoSet : [...paretoSet, { duration: walk, transfers: 0 }]);
+    });
+  }
+
+  /** Free-flow driving between `one` and each of `many`: away from `one`, or towards it when `arriveBy`. */
+  async function drive(one: LatLng, many: LatLng[], arriveBy: boolean) {
+    const body = await get<{ duration?: number }[]>("/api/v1/one-to-many", {
+      one: point(one),
+      many: points(many),
+      mode: "CAR",
+      max: String(3 * 3600),
+      maxMatchingDistance: "250",
+      arriveBy: String(arriveBy),
+    });
+    return body.map((d) => d.duration ?? null);
+  }
+
+  return {
+    transitManyToOne: (many, one, arriveBy) => transit(one, many, arriveBy, true),
+    transitOneToMany: (one, many, leaveAt) => transit(one, many, leaveAt, false),
+    driveFreeFlowOneToMany: (one, many) => drive(one, many, false),
+    driveFreeFlowManyToOne: (many, one) => drive(one, many, true),
   };
 }
 

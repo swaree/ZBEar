@@ -4,6 +4,8 @@ import intermodalArriveBy from "./recorded/transitous-intermodal-arrive-by.json"
 import intermodalWalkable from "./recorded/transitous-intermodal-walkable.json";
 import intermodalShortWalk from "./recorded/transitous-intermodal-short-walk.json";
 import carOneToMany from "./recorded/transitous-car-one-to-many.json";
+import intermodalLeaveAt from "./recorded/transitous-intermodal-leave-at.json";
+import carManyToOne from "./recorded/transitous-car-many-to-one.json";
 
 /** Serves one recorded response and remembers the URL that was requested. */
 function recordedFetch(body: unknown) {
@@ -115,6 +117,44 @@ describe("Transitous adapter (recorded responses)", () => {
     expect(url.searchParams.get("arriveBy")).toBe("false");
     expect(url.searchParams.get("one")).toBe("41.5;2");
     expect(result).toEqual([1181, 904, 1976, 691, null]);
+  });
+
+  it("asks for transit from the Destination to many places, leaving at the given time", async () => {
+    const { fetchFn, calls } = recordedFetch(intermodalLeaveAt);
+    const engine = transitousEngine({ fetch: fetchFn });
+
+    const result = await engine.transitOneToMany(destination, stations, new Date("2026-11-27T18:00:00+01:00"));
+
+    const url = calls[0]!;
+    expect(url.pathname).toBe("/api/experimental/one-to-many-intermodal");
+    expect(url.searchParams.get("one")).toBe("41.387;2.17");
+    expect(url.searchParams.get("many")).toBe(
+      "41.383003;2.04792,41.409897;2.020773,41.46302;2.272155,41.43537;2.002578",
+    );
+    expect(url.searchParams.get("arriveBy")).toBe("false");
+    expect(url.searchParams.get("time")).toBe("2026-11-27T17:00:00.000Z");
+    expect(url.searchParams.get("maxPreTransitTime")).toBe("2700");
+    expect(url.searchParams.get("maxPostTransitTime")).toBe("2700");
+    expect(result).toEqual([
+      { durationS: 1680, transfers: 0 },
+      { durationS: 2100, transfers: 0 },
+      { durationS: 2100, transfers: 0 },
+      { durationS: 2340, transfers: 0 },
+    ]);
+  });
+
+  it("asks for free-flow car times from many places to one", async () => {
+    const { fetchFn, calls } = recordedFetch(carManyToOne);
+    const engine = transitousEngine({ fetch: fetchFn });
+
+    const result = await engine.driveFreeFlowManyToOne([...stations, { lat: 40, lng: 0 }], { lat: 41.5, lng: 2.0 });
+
+    const url = calls[0]!;
+    expect(url.pathname).toBe("/api/v1/one-to-many");
+    expect(url.searchParams.get("mode")).toBe("CAR");
+    expect(url.searchParams.get("arriveBy")).toBe("true");
+    expect(url.searchParams.get("one")).toBe("41.5;2");
+    expect(result).toEqual([1651, 1302, 2110, 1177, 9713]);
   });
 
   it("reports a failed request as an error naming the provider", async () => {

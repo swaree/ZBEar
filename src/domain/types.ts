@@ -59,7 +59,15 @@ export interface TripRequest {
   arriveBy: Date;
   /** The vehicle's Environmental Label, which decides the ZBEs that bar it. Defaults to none. */
   vehicleLabel?: EnvironmentalLabel;
+  /** When the traveller leaves the Destination again. Without it the Trip has no Return Leg to plan. */
+  returnTime?: ReturnTime;
 }
+
+/**
+ * When the Return Leg starts from the Destination: at a given time, or after a stay there counted from
+ * the arrive-by time.
+ */
+export type ReturnTime = { at: Date } | { stayS: number };
 
 /** One Parking Candidate evaluated for a specific Trip. */
 export interface Option {
@@ -69,11 +77,26 @@ export interface Option {
   /** Walk to the stop, waiting, riding, transfers and the walk to the Destination. */
   transitS: number;
   transfers: number;
+  /** The Outbound Leg's door-to-door time, plus the Return Leg's when there is one. */
   doorToDoorS: number;
   /** Against the Baseline: positive when this Option is faster; null when there is no Baseline. */
   timeSavedS: number | null;
   leaveOriginAt: Date;
+  /** When to leave the parking for the transit to the Destination. */
   leaveParkingAt: Date;
+  /** Null when the Trip has no return time. */
+  returnLeg: OptionReturnLeg | null;
+}
+
+/** An Option's way back: transit from the Destination to the parking, then the drive to the Origin. */
+export interface OptionReturnLeg {
+  /** The walk to the stop, waiting, riding, transfers and the walk to the parking. */
+  transitS: number;
+  transfers: number;
+  driveS: number;
+  /** When the drive back starts from the parking. */
+  driveFromParkingAt: Date;
+  arriveOriginAt: Date;
 }
 
 /** The whole Trip by transit from the Origin, no car: what each Option is measured against. */
@@ -81,10 +104,12 @@ export interface Baseline {
   transitS: number;
   transfers: number;
   leaveOriginAt: Date;
+  /** Transit from the Destination back to the Origin, leaving at the return time; null with no return time. */
+  returnLeg: { transitS: number; transfers: number; arriveOriginAt: Date } | null;
 }
 
 export interface Recommendation {
   options: Option[];
-  /** Null when transit can't reach the Destination from the Origin by that time. */
+  /** Null when transit can't reach the Destination from the Origin by that time, or can't bring the traveller back. */
   baseline: Baseline | null;
 }

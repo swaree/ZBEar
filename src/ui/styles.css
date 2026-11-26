@@ -98,6 +98,27 @@ a {
   min-width: 0;
 }
 
+.trip-form .return {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.trip-form .return legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.segmented {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .trip-form input[aria-invalid="true"] {
   border-color: var(--error);
 }
@@ -197,7 +218,8 @@ a {
   flex-wrap: wrap;
 }
 
-.tap-target button {
+.tap-target button,
+.trip-form .segmented button {
   font: inherit;
   font-size: 0.875rem;
   min-height: 40px;
@@ -209,7 +231,8 @@ a {
   cursor: pointer;
 }
 
-.tap-target button.active {
+.tap-target button.active,
+.trip-form .segmented button.active {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-text);

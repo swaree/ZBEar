@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { recommend } from "../domain/recommend";
-import type { Baseline, LatLng, Option, ParkingCandidate, Recommendation, TripRequest } from "../domain/types";
+import { recommend, returnStartsAt } from "../domain/recommend";
+import type { Baseline, LatLng, Option, ParkingCandidate, Recommendation, ReturnTime, TripRequest } from "../domain/types";
 import { ENVIRONMENTAL_LABELS, type EnvironmentalLabel, type Zbe } from "../domain/zbe";
 import { loadDiscoveredParkingCandidates } from "../data/parkingCandidates";
 import { loadZbeDataset } from "../data/zbeDataset";
@@ -14,6 +14,8 @@ import { googleMapsTransitUrl } from "./mapLinks";
 const TIMETABLE_HORIZON_DAYS = 3;
 
 type TapTarget = "origin" | "destination";
+/** How the return is given: not at all, as a time of day, or as a stay after the arrive-by time. */
+type ReturnMode = "none" | "at" | "after";
 
 const NO_ZBES: Zbe[] = [];
 const NO_CANDIDATES: ParkingCandidate[] = [];
@@ -30,6 +32,9 @@ export function App() {
   const [originText, setOriginText] = useState("");
   const [destinationText, setDestinationText] = useState("");
   const [arriveByText, setArriveByText] = useState(defaultArriveBy);
+  const [returnMode, setReturnMode] = useState<ReturnMode>("none");
+  const [returnAtText, setReturnAtText] = useState("18:00");
+  const [stayText, setStayText] = useState("");
   const [planned, setPlanned] = useState<{ trip: TripRequest; recommendation: Recommendation; fitTo: LatLng[] } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,12 +70,16 @@ export function App() {
   const origin = parseLatLng(originText);
   const destination = parseLatLng(destinationText);
   const arriveBy = arriveByText ? new Date(arriveByText) : null;
+  const returnTime = arriveBy && readReturnTime(returnMode, returnAtText, stayText, arriveBy);
   const outdated =
     planned != null &&
     (!samePoint(planned.trip.origin, origin) ||
       !samePoint(planned.trip.destination, destination) ||
-      planned.trip.vehicleLabel !== vehicleLabel);
-  const beyondHorizon = arriveBy != null && arriveBy.getTime() - Date.now() > TIMETABLE_HORIZON_DAYS * 86_400_000;
+      planned.trip.vehicleLabel !== vehicleLabel ||
+      returnKey(planned.trip) !== returnKey({ arriveBy, returnTime }));
+  const returnStart = arriveBy && returnTime !== "invalid" ? returnStartsAt({ arriveBy, returnTime: returnTime ?? undefined }) : null;
+  const latest = returnStart ?? arriveBy;
+  const beyondHorizon = latest != null && latest.getTime() - Date.now() > TIMETABLE_HORIZON_DAYS * 86_400_000;
 
   function onMapTap(point: LatLng) {
     if (tapTarget === "origin") {
@@ -93,11 +102,11 @@ export function App() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!origin || !destination || !arriveBy || !zbes || !candidates) return;
+    if (!origin || !destination || !arriveBy || returnTime === "invalid" || !zbes || !candidates) return;
     setBusy(true);
     setError(null);
     try {
-      const trip: TripRequest = { origin, destination, arriveBy, vehicleLabel };
+      const trip: TripRequest = { origin, destination, arriveBy, vehicleLabel, returnTime: returnTime ?? undefined };
       const recommendation = await recommend(trip, candidates, { zbes }, engine);
       const fitTo = [origin, destination, ...recommendation.options.map((o) => o.candidate.location)];
       setPlanned({ trip, recommendation, fitTo });
@@ -141,6 +150,50 @@ export function App() {
           Arrive by
           <input type="datetime-local" value={arriveByText} onChange={(e) => setArriveByText(e.target.value)} />
         </label>
+        <fieldset className="return">
+          <legend>
+            Return <span className="hint">optional: ranks by the round trip</span>
+          </legend>
+          <div className="segmented" role="radiogroup" aria-label="Return">
+            {(["none", "at", "after"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={returnMode === mode}
+                className={returnMode === mode ? "active" : undefined}
+                onClick={() => setReturnMode(mode)}
+              >
+                {mode === "none" ? "None" : mode === "at" ? "At" : "After"}
+              </button>
+            ))}
+          </div>
+          {returnMode === "at" && (
+            <label>
+              Leave the Destination at <span className="hint">the next day if before the arrival</span>
+              <input
+                type="time"
+                value={returnAtText}
+                onChange={(e) => setReturnAtText(e.target.value)}
+                aria-invalid={returnTime === "invalid"}
+              />
+            </label>
+          )}
+          {returnMode === "after" && (
+            <label>
+              Stay for <span className="hint">after the arrive-by time, e.g. 2h30 or 90 min</span>
+              <input
+                value={stayText}
+                onChange={(e) => setStayText(e.target.value)}
+                placeholder="2h30"
+                aria-invalid={stayText !== "" && returnTime === "invalid"}
+              />
+            </label>
+          )}
+          {returnStart && arriveBy && (
+            <span className="hint">Leaving the Destination {dayAndClock(returnStart, arriveBy)}</span>
+          )}
+        </fieldset>
         <label>
           Environmental Label <span className="hint">decides which ZBEs bar the car</span>
           <select value={vehicleLabel} onChange={(e) => onVehicleLabelChange(e.target.value as EnvironmentalLabel)}>
@@ -161,7 +214,10 @@ export function App() {
         {candidateError && (
           <p className="error">Could not load the Parking Candidates ({candidateError}), so no Trip can be planned.</p>
         )}
-        <button type="submit" disabled={!origin || !destination || !arriveBy || !zbes || !candidates || busy}>
+        <button
+          type="submit"
+          disabled={!origin || !destination || !arriveBy || returnTime === "invalid" || !zbes || !candidates || busy}
+        >
           {busy ? "Planning…" : zbes && candidates ? "Find parking" : "Loading map data…"}
         </button>
       </form>
@@ -171,12 +227,16 @@ export function App() {
       {planned && (
         <section className={outdated ? "results outdated" : "results"}>
           {outdated && (
-            <p className="notice">The Origin, Destination or Environmental Label changed since planning: press Find parking again.</p>
+            <p className="notice">
+              The Origin, Destination, return or Environmental Label changed since planning: press Find parking again.
+            </p>
           )}
           <BaselineCard baseline={planned.recommendation.baseline} trip={planned.trip} />
           {planned.recommendation.options.length === 0 ? (
-            <p>No Parking Candidate can reach this Destination by that time without driving through a ZBE that bars
-              the car.</p>
+            <p>
+              No Parking Candidate can reach this Destination by that time{planned.trip.returnTime ? ", and back," : ""}{" "}
+              without driving through a ZBE that bars the car.
+            </p>
           ) : (
             <ol className="options">
               {planned.recommendation.options.map((o) => (
@@ -242,16 +302,30 @@ function OptionCard({ option, selected, onSelect }: { option: Option; selected: 
       <button type="button" onClick={onSelect}>
         <div className="option-head">
           <span className="option-name">{option.candidate.name}</span>
-          <span className="option-total">{minutes(option.doorToDoorS)}</span>
+          <span className="option-total">
+            {minutes(option.doorToDoorS)}
+            {option.returnLeg && <span className="hint"> round trip</span>}
+          </span>
         </div>
         {option.timeSavedS != null && <TimeSaved seconds={option.timeSavedS} />}
         <div className="option-split">
           drive {minutes(option.driveS)} · find a space {minutes(option.timeToFindSpaceS)} · transit{" "}
-          {minutes(option.transitS)} ({option.transfers} {option.transfers === 1 ? "transfer" : "transfers"})
+          {minutes(option.transitS)} ({transfers(option.transfers)})
         </div>
         <div className="option-times">
           Leave the Origin at {clock(option.leaveOriginAt)} · leave the parking at {clock(option.leaveParkingAt)}
         </div>
+        {option.returnLeg && (
+          <>
+            <div className="option-split">
+              back: transit {minutes(option.returnLeg.transitS)} ({transfers(option.returnLeg.transfers)}) · drive {minutes(option.returnLeg.driveS)}
+            </div>
+            <div className="option-times">
+              Drive back from the parking at {clock(option.returnLeg.driveFromParkingAt)} · at the Origin at{" "}
+              {clock(option.returnLeg.arriveOriginAt)}
+            </div>
+          </>
+        )}
       </button>
     </li>
   );
@@ -266,15 +340,24 @@ function BaselineCard({ baseline, trip }: { baseline: Baseline | null; trip: Tri
   if (!baseline) {
     return (
       <p className="baseline">
-        Transit only, no car: no connection reaches the Destination by that time. {link}
+        Transit only, no car: no connection reaches the Destination by that time
+        {trip.returnTime ? ", or brings you back" : ""}. {link}
       </p>
     );
   }
+  const back = baseline.returnLeg;
   return (
     <p className="baseline">
-      Transit only, no car: <strong>{minutes(baseline.transitS)}</strong>, leaving the Origin at{" "}
-      {clock(baseline.leaveOriginAt)} ({baseline.transfers} {baseline.transfers === 1 ? "transfer" : "transfers"}).{" "}
-      {link} <span className="hint">(set the arrival time there)</span>
+      Transit only, no car: <strong>{minutes(baseline.transitS + (back?.transitS ?? 0))}</strong>
+      {back && " round trip"}, leaving the Origin at {clock(baseline.leaveOriginAt)} ({transfers(baseline.transfers)})
+      {back && (
+        <>
+          {" "}
+          and back in {minutes(back.transitS)} ({transfers(back.transfers)}), at
+          the Origin at {clock(back.arriveOriginAt)}
+        </>
+      )}
+      . {link} <span className="hint">(set the arrival time there)</span>
     </p>
   );
 }
@@ -306,13 +389,61 @@ function parseLatLng(text: string): LatLng | null {
   return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
 }
 
+/** The return as the form gives it: none, a valid return time, or "invalid" while it can't be read. */
+function readReturnTime(mode: ReturnMode, atText: string, stayText: string, arriveBy: Date): ReturnTime | null | "invalid" {
+  if (mode === "none") return null;
+  if (mode === "after") {
+    const stayS = parseStay(stayText);
+    return stayS == null ? "invalid" : { stayS };
+  }
+  const m = atText.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return "invalid";
+  // A time of day on the arrival's day, or the next day when it isn't after the arrival.
+  const at = new Date(arriveBy);
+  at.setHours(Number(m[1]), Number(m[2]), 0, 0);
+  if (at <= arriveBy) at.setDate(at.getDate() + 1);
+  return { at };
+}
+
+/** A stay such as "2h30", "2 h 30 min", "1.5h", "2:30", "90 min" or "90" (minutes), in seconds; null if unreadable or zero. */
+function parseStay(text: string): number | null {
+  const t = text.trim().toLowerCase().replace(",", ".");
+  let hours = 0;
+  let mins = 0;
+  const clockLike = t.match(/^(\d+):([0-5]\d)$/);
+  if (clockLike) {
+    hours = Number(clockLike[1]);
+    mins = Number(clockLike[2]);
+  } else {
+    const m = t.match(/^(?:(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*(?:m|mins?|minutes?)?)?$/);
+    if (!m || (m[1] == null && m[2] == null)) return null;
+    hours = Number(m[1] ?? 0);
+    mins = Number(m[2] ?? 0);
+  }
+  const s = Math.round((hours * 60 + mins) * 60);
+  return s > 0 ? s : null;
+}
+
+/** Tells apart the returns that plan differently: none, unreadable, or leaving the Destination at a given moment. */
+function returnKey({ arriveBy, returnTime }: { arriveBy: Date | null; returnTime?: ReturnTime | null | "invalid" }): string {
+  if (returnTime === "invalid") return "invalid";
+  return String(arriveBy && returnTime ? returnStartsAt({ arriveBy, returnTime })?.getTime() : "none");
+}
+
 const samePoint = (a: LatLng, b: LatLng | null) => b != null && a.lat === b.lat && a.lng === b.lng;
 
 /** About 1 m of precision; more digits would only be noise from a finger tap. */
 const formatLatLng = (p: LatLng) => `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
 
 const minutes = (s: number) => `${Math.round(s / 60)} min`;
+const transfers = (n: number) => `${n} ${n === 1 ? "transfer" : "transfers"}`;
 const clock = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+/** A clock time, with the day when it isn't the same day as `reference`. */
+function dayAndClock(d: Date, reference: Date): string {
+  if (d.toDateString() === reference.toDateString()) return `at ${clock(d)}`;
+  return `on ${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} at ${clock(d)}`;
+}
 
 function defaultArriveBy(): string {
   const d = new Date(Date.now() + 2 * 3600_000);
