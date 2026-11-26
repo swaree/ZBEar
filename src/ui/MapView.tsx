@@ -19,6 +19,9 @@ const ZBE_COLOR = "#c2410c";
 const DISPUTED_RGB: [number, number, number] = [124, 45, 18];
 const DISPUTED_COLOR = `rgb(${DISPUTED_RGB.join(" ")})`;
 const DISPUTED_HATCH = "zbe-disputed-hatch";
+const CANDIDATE_SOURCE = "parking-candidates";
+/** Matches the light-scheme --candidate in styles.css: the base map is light in both schemes. */
+const CANDIDATE_COLOR = "#0f766e";
 
 /** A tile of diagonal stripes in the given colour, for a hatched fill. */
 function hatch([r, g, b]: [number, number, number]): { width: number; height: number; data: Uint8Array } {
@@ -36,7 +39,10 @@ function hatch([r, g, b]: [number, number, number]): { width: number; height: nu
 export interface MapViewProps {
   origin: LatLng | null;
   destination: LatLng | null;
+  /** Every Parking Candidate, drawn as small dots: there are thousands. */
   candidates: ParkingCandidate[];
+  /** The Options' Parking Candidates, drawn as markers. */
+  optionCandidates: ParkingCandidate[];
   zbes: Zbe[];
   selectedId: string | null;
   /** The map fits these points whenever this array changes identity (e.g. after planning a Trip). */
@@ -84,11 +90,17 @@ export function MapView(props: MapViewProps) {
     const m = map.current;
     if (!m) return;
     for (const mk of candidateMarkers.current) mk.remove();
-    candidateMarkers.current = props.candidates.map((c) => {
+    candidateMarkers.current = props.optionCandidates.map((c) => {
       const el = markerElement(c.id === props.selectedId ? "marker-candidate selected" : "marker-candidate", c.name);
       return new maplibregl.Marker({ element: el }).setLngLat(toLngLat(c.location)).addTo(m);
     });
-  }, [props.candidates, props.selectedId]);
+  }, [props.optionCandidates, props.selectedId]);
+
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !styleReady) return;
+    showCandidates(m, props.candidates);
+  }, [props.candidates, styleReady]);
 
   useEffect(() => {
     const m = map.current;
@@ -143,10 +155,13 @@ function showZbes(m: maplibregl.Map, zbes: Zbe[]) {
   }
   m.addSource(ZBE_SOURCE, { type: "geojson", data: perimeters });
   m.addSource(DISPUTED_SOURCE, { type: "geojson", data: disputed });
-  const firstLabels = m.getStyle().layers.find((l) => l.type === "symbol")?.id;
+  // Beneath the Parking Candidates' dots if those loaded first, else beneath the labels.
+  const beneath = m.getLayer(CANDIDATE_SOURCE)
+    ? CANDIDATE_SOURCE
+    : m.getStyle().layers.find((l) => l.type === "symbol")?.id;
   m.addLayer(
     { id: "zbe-fill", type: "fill", source: ZBE_SOURCE, paint: { "fill-color": ZBE_COLOR, "fill-opacity": 0.12 } },
-    firstLabels,
+    beneath,
   );
   m.addLayer(
     {
@@ -155,7 +170,7 @@ function showZbes(m: maplibregl.Map, zbes: Zbe[]) {
       source: ZBE_SOURCE,
       paint: { "line-color": ZBE_COLOR, "line-width": 1.5, "line-opacity": 0.8 },
     },
-    firstLabels,
+    beneath,
   );
   m.addImage(DISPUTED_HATCH, hatch(DISPUTED_RGB));
   m.addLayer(
@@ -165,7 +180,7 @@ function showZbes(m: maplibregl.Map, zbes: Zbe[]) {
       source: DISPUTED_SOURCE,
       paint: { "fill-pattern": DISPUTED_HATCH },
     },
-    firstLabels,
+    beneath,
   );
   m.addLayer(
     {
@@ -174,7 +189,38 @@ function showZbes(m: maplibregl.Map, zbes: Zbe[]) {
       source: DISPUTED_SOURCE,
       paint: { "line-color": DISPUTED_COLOR, "line-width": 1.5, "line-dasharray": [2, 1.5] },
     },
-    firstLabels,
+    beneath,
+  );
+}
+
+/** Draws every Parking Candidate as a small dot, above the ZBEs and beneath the base map's labels. */
+function showCandidates(m: maplibregl.Map, candidates: ParkingCandidate[]) {
+  const data: FeatureCollection = {
+    type: "FeatureCollection",
+    features: candidates.map((c) => ({
+      type: "Feature",
+      properties: { name: c.name },
+      geometry: { type: "Point", coordinates: toLngLat(c.location) },
+    })),
+  };
+  const source = m.getSource<maplibregl.GeoJSONSource>(CANDIDATE_SOURCE);
+  if (source) {
+    source.setData(data);
+    return;
+  }
+  m.addSource(CANDIDATE_SOURCE, { type: "geojson", data });
+  m.addLayer(
+    {
+      id: CANDIDATE_SOURCE,
+      type: "circle",
+      source: CANDIDATE_SOURCE,
+      paint: {
+        "circle-color": CANDIDATE_COLOR,
+        "circle-opacity": 0.45,
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 1.5, 14, 4],
+      },
+    },
+    m.getStyle().layers.find((l) => l.type === "symbol")?.id,
   );
 }
 

@@ -1,4 +1,5 @@
 import type { RoutingEngine } from "../routing/RoutingEngine";
+import { distanceM } from "./geo";
 import type { Option, ParkingCandidate, Recommendation, TripRequest } from "./types";
 import { isInsideAnyZbe, type Zbe } from "./zbe";
 
@@ -9,14 +10,44 @@ export interface Datasets {
 
 const MAX_OPTIONS = 5;
 
+/** The Recommendation's tunable thresholds. */
+export interface RecommendSettings {
+  /**
+   * The detour bound: a Parking Candidate is routed only when Origin → candidate → Destination
+   * is at most this many times Origin → Destination, all straight-line.
+   */
+  maxDetourRatio: number;
+  /**
+   * At most this many Parking Candidates are routed, those with the smallest detours. Transitous
+   * fair use allows 128 points per one-to-many call, and the Origin rides along in one of them.
+   */
+  maxRoutedCandidates: number;
+}
+
+const DEFAULT_SETTINGS: RecommendSettings = {
+  maxDetourRatio: 1.5,
+  maxRoutedCandidates: 127,
+};
+
 export async function recommend(
   trip: TripRequest,
   allCandidates: ParkingCandidate[],
   datasets: Datasets,
   engine: RoutingEngine,
+  settings: Partial<RecommendSettings> = {},
 ): Promise<Recommendation> {
-  // Parking Candidates should already be outside every ZBE; this is the safety net for Curated ones.
-  const candidates = allCandidates.filter((c) => !isInsideAnyZbe(c.location, datasets.zbes));
+  const { maxDetourRatio, maxRoutedCandidates } = { ...DEFAULT_SETTINGS, ...settings };
+  const directDistanceM = Math.max(distanceM(trip.origin, trip.destination), 1);
+  const candidates = allCandidates
+    .map((candidate) => ({
+      candidate,
+      detour: (distanceM(trip.origin, candidate.location) + distanceM(candidate.location, trip.destination)) / directDistanceM,
+    }))
+    // Parking Candidates should already be outside every ZBE; this is the safety net for Curated ones.
+    .filter(({ candidate, detour }) => detour <= maxDetourRatio && !isInsideAnyZbe(candidate.location, datasets.zbes))
+    .sort((a, b) => a.detour - b.detour)
+    .slice(0, maxRoutedCandidates)
+    .map(({ candidate }) => candidate);
   const locations = candidates.map((c) => c.location);
   // The Origin rides along in the candidates' transit call: that gives the Baseline for free.
   const [transitWithOrigin, drive] = await Promise.all([

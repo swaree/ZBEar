@@ -12,6 +12,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { buildZbeDataset } from "../src/dataset/buildZbes";
 import type { OverpassResponse } from "../src/dataset/osm";
+import { queryOverpass } from "./overpass";
 import { restrictionTable } from "../src/dataset/restrictionTable";
 import { settlements } from "../src/dataset/settlements";
 
@@ -21,7 +22,6 @@ const OUTPUT = new URL("../public/data/zbes.json", import.meta.url);
 const HEADERS = { "user-agent": "dataset-build" };
 /** ZBEar covers Catalonia: the INE province codes of Barcelona, Girona, Lleida and Tarragona. */
 const CATALONIA = ["08", "17", "25", "43"];
-const OVERPASS = "https://overpass-api.de/api/interpreter";
 /** Every low emission zone mapped in Catalonia, with the geometry of each way and relation member. */
 const OSM_QUERY = `[out:json][timeout:120];
 area["ISO3166-2"="ES-CT"]["admin_level"="4"]->.catalonia;
@@ -42,12 +42,9 @@ async function main() {
   const dgtFiles: string[] = [];
   for (const url of urls) dgtFiles.push(await fetchText(url)); // one at a time, to be gentle with the NAP
 
-  const osmRes = await fetch(OVERPASS, { method: "POST", headers: HEADERS, body: new URLSearchParams({ data: OSM_QUERY }) });
-  if (!osmRes.ok) throw new Error(`${OVERPASS}: HTTP ${osmRes.status}`);
-  const osm = (await osmRes.json()) as OverpassResponse & { remark?: string };
-  // Overpass reports a timeout or memory limit as a remark beside a partial (or empty) result.
-  if (osm.remark) throw new Error(`${OVERPASS}: ${osm.remark}`);
-  if (osm.elements.length === 0) throw new Error(`${OVERPASS}: no low emission zones in Catalonia: has the query broken?`);
+  const osm: OverpassResponse = {
+    elements: await queryOverpass<OverpassResponse["elements"][number]>(OSM_QUERY, "low emission zones in Catalonia"),
+  };
 
   const { dataset, warnings } = buildZbeDataset({
     dgtFiles,

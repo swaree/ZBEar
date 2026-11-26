@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { recommend } from "../domain/recommend";
-import type { Baseline, LatLng, Option, Recommendation, TripRequest } from "../domain/types";
+import type { Baseline, LatLng, Option, ParkingCandidate, Recommendation, TripRequest } from "../domain/types";
 import type { Zbe } from "../domain/zbe";
-import { seedCandidates } from "../data/seedCandidates";
+import { loadDiscoveredParkingCandidates } from "../data/parkingCandidates";
 import { loadZbeDataset } from "../data/zbeDataset";
 import { transitousEngine } from "../routing/transitous";
 import { MapView } from "./MapView";
@@ -14,6 +14,7 @@ const TIMETABLE_HORIZON_DAYS = 3;
 type TapTarget = "origin" | "destination";
 
 const NO_ZBES: Zbe[] = [];
+const NO_CANDIDATES: ParkingCandidate[] = [];
 
 export function App() {
   const engine = useMemo(() => transitousEngine(), []);
@@ -28,17 +29,29 @@ export function App() {
   // Planning without the ZBEs could recommend parking inside one, so it waits for them.
   const [zbes, setZbes] = useState<Zbe[] | null>(null);
   const [zbeError, setZbeError] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<ParkingCandidate[] | null>(null);
+  const [candidateError, setCandidateError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
     loadZbeDataset().then(
       (dataset) => !cancelled && setZbes(dataset.zbes),
-      (err: unknown) => !cancelled && setZbeError(err instanceof Error ? err.message : String(err)),
+      (err: unknown) => !cancelled && setZbeError(message(err)),
+    );
+    loadDiscoveredParkingCandidates().then(
+      (loaded) => !cancelled && setCandidates(loaded),
+      (err: unknown) => !cancelled && setCandidateError(message(err)),
     );
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const optionCandidates = useMemo(
+    () => planned?.recommendation.options.map((o) => o.candidate) ?? NO_CANDIDATES,
+    [planned],
+  );
 
   const origin = parseLatLng(originText);
   const destination = parseLatLng(destinationText);
@@ -59,12 +72,12 @@ export function App() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!origin || !destination || !arriveBy || !zbes) return;
+    if (!origin || !destination || !arriveBy || !zbes || !candidates) return;
     setBusy(true);
     setError(null);
     try {
       const trip: TripRequest = { origin, destination, arriveBy };
-      const recommendation = await recommend(trip, seedCandidates, { zbes }, engine);
+      const recommendation = await recommend(trip, candidates, { zbes }, engine);
       const fitTo = [origin, destination, ...recommendation.options.map((o) => o.candidate.location)];
       setPlanned({ trip, recommendation, fitTo });
       setSelected(recommendation.options[0]?.candidate.id ?? null);
@@ -114,8 +127,11 @@ export function App() {
           </p>
         )}
         {zbeError && <p className="error">Could not load the ZBEs ({zbeError}), so no Trip can be planned.</p>}
-        <button type="submit" disabled={!origin || !destination || !arriveBy || !zbes || busy}>
-          {busy ? "Planning…" : zbes ? "Find parking" : "Loading ZBEs…"}
+        {candidateError && (
+          <p className="error">Could not load the Parking Candidates ({candidateError}), so no Trip can be planned.</p>
+        )}
+        <button type="submit" disabled={!origin || !destination || !arriveBy || !zbes || !candidates || busy}>
+          {busy ? "Planning…" : zbes && candidates ? "Find parking" : "Loading map data…"}
         </button>
       </form>
 
@@ -161,7 +177,8 @@ export function App() {
         <MapView
           origin={origin}
           destination={destination}
-          candidates={seedCandidates}
+          candidates={candidates ?? NO_CANDIDATES}
+          optionCandidates={optionCandidates}
           zbes={zbes ?? NO_ZBES}
           selectedId={selected}
           fitTo={planned?.fitTo ?? null}

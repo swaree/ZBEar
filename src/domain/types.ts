@@ -3,11 +3,50 @@ export interface LatLng {
   lng: number;
 }
 
+/** What sort of place a Parking Candidate is. */
+export type ParkingKind = "car-park" | "park-and-ride" | "street";
+
+/**
+ * The rules for leaving a car at a Parking Candidate, as the source states them (OSM tag
+ * values, uninterpreted). A missing field is unknown, not "no rule".
+ */
+export interface ParkingConditions {
+  /** OSM `fee`, e.g. "yes", "no", or a conditional such as "yes @ (Mo-Fr 08:00-20:00)". */
+  fee?: string;
+  /** OSM `charge`, e.g. "2.50 EUR/hour". */
+  charge?: string;
+  /** OSM `maxstay`, e.g. "2 hours". */
+  maxStay?: string;
+  /** OSM `access` when it restricts who may park, e.g. "residents". */
+  access?: string;
+  /** OSM `opening_hours`. */
+  openingHours?: string;
+}
+
+/** A Parking Candidate found automatically from map data, as published by the dataset build. */
+export interface DiscoveredParkingCandidate {
+  /** "osm:<type>/<id>" of the car park it was built from: stable across rebuilds. */
+  id: string;
+  name: string;
+  location: LatLng;
+  kind: ParkingKind;
+  conditions: ParkingConditions;
+}
+
+/** The published Discovered Parking Candidates. */
+export interface ParkingCandidateDataset {
+  /** ISO timestamp of the dataset build. */
+  builtAt: string;
+  candidates: DiscoveredParkingCandidate[];
+}
+
 /** A place outside every ZBE where the car can be left for the length of a Trip. */
 export interface ParkingCandidate {
   id: string;
   name: string;
   location: LatLng;
+  kind: ParkingKind;
+  conditions: ParkingConditions;
   timeToFindSpaceS: number;
 }
 

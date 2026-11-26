@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p functions && tsc --noEmit -p scripts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "data:zbes": "vite-node scripts/build-zbes.ts"
+    "data:zbes": "vite-node scripts/build-zbes.ts",
+    "data:candidates": "vite-node scripts/build-parking-candidates.ts"
   },
   "dependencies": {
     "maplibre-gl": "^6.19.0",

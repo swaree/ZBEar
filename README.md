@@ -25,6 +25,14 @@ DGT is the source of truth for every ZBE it lists. OSM `boundary=low_emission_zo
 
 Restriction Windows and barred Environmental Labels come from the hand-maintained table in [src/dataset/restrictionTable.ts](src/dataset/restrictionTable.ts), not from DGT. A ZBE missing from the table is published with the worst case (all day, every day), and the build warns about it.
 
+```sh
+npm run data:candidates   # OSM car parks in Catalonia → public/data/parking-candidates.json (reads zbes.json, so run data:zbes first)
+```
+
+**Discovered Parking Candidates** are OSM `amenity=parking` outside every ZBE (disputed areas count as inside), within 500 m straight-line of a transit stop of any mode, and not `access=private|customers|permit|no|delivery|employees`. Distance to a ZBE edge doesn't matter: a car park at a fast rail station far out can beat one at the edge. Car parks within 150 m merge into one candidate that takes the name, location, kind, Parking Conditions and OSM ID of the first of them: a P+R, else the lowest OSM ID. New OSM elements get higher IDs, so a candidate's ID survives rebuilds even as car parks are mapped or edited nearby (unless a new P+R appears), while the other car parks' Parking Conditions are not kept. Unnamed car parks are named after the nearest named transit stop. The kind (car park, P+R, street) and the `fee`, `charge`, `maxstay`, `access` and `opening_hours` tags are carried over as they are; missing ones stay unknown.
+
+Each query then picks the candidates worth routing: those whose straight-line detour (Origin → candidate → Destination against Origin → Destination) is at most 1.5, and no more than the 127 with the smallest detours, so every Transitous one-to-many call stays within its 128-point fair use.
+
 Pages Functions (`functions/`) run only on Cloudflare; running them locally needs Wrangler, which needs Node 22.
 
 ## Deploy
