@@ -8,6 +8,14 @@ ZBEar recommends where to leave a car outside every low emission zone, and how t
 A low emission zone: an area, defined by a municipality, where vehicles with certain Environmental Labels may not circulate during its Restriction Window. ZBEar considers every active ZBE in Catalonia, not only Barcelona's.
 _Avoid_: LEZ, zone, perimeter (the perimeter is the ZBE's boundary, not the ZBE)
 
+**Disputed Area**:
+A place where the DGT and OSM perimeters of the same ZBE disagree by more than a small threshold (in area and in width). It counts as inside the ZBE and is marked on the map until a Settlement decides it.
+_Avoid_: uncertain area, conflict
+
+**Settlement**:
+A hand-made, repo-maintained decision that a Disputed Area is inside or outside its ZBE. It is applied last and wins over both DGT and OSM.
+_Avoid_: override, fix, correction
+
 **Restriction Window**:
 The recurring time span during which a ZBE bars a vehicle (e.g. Mon–Fri 07:00–20:00), assumed to apply even on holidays and during suspensions. It applies to the time the vehicle is actually *driving* inside the ZBE.
 _Avoid_: schedule, opening hours

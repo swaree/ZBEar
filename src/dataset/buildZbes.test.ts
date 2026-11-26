@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildZbeDataset, type RestrictionTable } from "./buildZbes";
+import { buildZbeDataset, type RestrictionTable, type Settlement } from "./buildZbes";
 import granollers from "./fixtures/dgt/Granollers.xml?raw";
 import mataro from "./fixtures/dgt/Mataro.xml?raw";
 import alicante from "./fixtures/dgt/Alicante.xml?raw";
 import sevillaCartuja from "./fixtures/dgt/SevillaCartuja.xml?raw";
+import osmCastelldefels from "./fixtures/osm/Castelldefels.json";
+import osmGranollers from "./fixtures/osm/Granollers.json";
+import osmMataro from "./fixtures/osm/Mataro.json";
+import { isInsideAnyZbe } from "../domain/zbe";
 
 const MON_FRI = [1, 2, 3, 4, 5] as const;
 const builtAt = new Date("2026-11-26T12:00:00Z");
@@ -158,3 +162,204 @@ describe("ZBE dataset build", () => {
     expect(warnings).toContainEqual(expect.stringMatching(/Granollers.*province/));
   });
 });
+
+describe("ZBE dataset build, OSM gap-fill", () => {
+  /** Inside Castelldefels' OSM perimeter, ~350 m from its edge; Castelldefels is not in the DGT feed. */
+  const IN_CASTELLDEFELS = { lng: 1.97766, lat: 41.281933 };
+
+  it("publishes a ZBE present only in OSM, with the worst-case Restriction Window, and warns", () => {
+    const { dataset, warnings } = buildZbeDataset({
+      dgtFiles: [granollers],
+      osm: osmCastelldefels,
+      restrictionTable: {},
+      provinces: CATALONIA,
+      builtAt,
+    });
+
+    const castelldefels = dataset.zbes.find((z) => z.id === "osm:relation/15052307");
+    expect(castelldefels).toMatchObject({
+      name: "ZBE Castelldefels",
+      restrictionWindow: { weekdays: [1, 2, 3, 4, 5, 6, 7], start: "00:00", end: "24:00" },
+      barredLabels: ["none", "B", "C", "ECO"],
+    });
+    expect(isInsideAnyZbe(IN_CASTELLDEFELS, [castelldefels!])).toBe(true);
+    expect(isInsideAnyZbe({ lng: 1.96, lat: 41.281933 }, [castelldefels!])).toBe(false);
+    expect(warnings).toContainEqual(expect.stringMatching(/osm:relation\/15052307.*worst case/));
+  });
+
+  it("keeps DGT's perimeter for a ZBE that both DGT and OSM have", () => {
+    const { dataset } = buildZbeDataset({
+      dgtFiles: [granollers],
+      osm: osmGranollers,
+      restrictionTable: {},
+      provinces: CATALONIA,
+      builtAt,
+    });
+
+    expect(dataset.zbes.map((z) => [z.id, z.perimeter])).toEqual([
+      ["8096_Granollers", { type: "MultiPolygon", coordinates: [[GRANOLLERS_RING]] }],
+    ]);
+  });
+
+  it("publishes an OSM ZBE that only borders a DGT ZBE, as Gavà and Viladecans do", () => {
+    // East of Granollers' east edge, overlapping it by ~15 m as neighbouring perimeters do.
+    const neighbour = osmWay(1, { boundary: "low_emission_zone", short_name: "ZBE Neighbour" }, [
+      [2.2902458, 41.602875],
+      [2.295, 41.602875],
+      [2.295, 41.61001],
+      [2.2905567, 41.61001],
+      [2.2902458, 41.602875],
+    ]);
+
+    const { dataset } = buildZbeDataset({ dgtFiles: [granollers], osm: neighbour, restrictionTable: {}, provinces: CATALONIA, builtAt });
+
+    expect(dataset.zbes.map((z) => z.id)).toEqual(["8096_Granollers", "osm:way/1"]);
+  });
+
+  it("leaves out an OSM ZBE that DGT lists as inactive", () => {
+    const inactive = granollers.replace("<conz:status>active</conz:status>", "<conz:status>inactive</conz:status>");
+
+    const { dataset } = buildZbeDataset({ dgtFiles: [inactive], osm: osmGranollers, restrictionTable: {}, provinces: CATALONIA, builtAt });
+
+    expect(dataset.zbes).toEqual([]);
+  });
+
+  it("leaves out an OSM ZBE that is not in force yet", () => {
+    // OSM maps Badalona's ZBE ahead of its opening_date, 2027-01-01.
+    const notYet = structuredClone(osmCastelldefels);
+    notYet.elements[0]!.tags.start_date = "2027-01-01";
+
+    const { dataset } = buildZbeDataset({ dgtFiles: [], osm: notYet, restrictionTable: {}, provinces: CATALONIA, builtAt });
+
+    expect(dataset.zbes).toEqual([]);
+  });
+
+  it("leaves out an OSM ZBE whose ways don't close into a perimeter, and warns", () => {
+    // The Catalan extract has a few such stray two-node ways.
+    const stray = osmWay(1125257814, { boundary: "low_emission_zone" }, [
+      [2.1, 41.4],
+      [2.101, 41.401],
+    ]);
+
+    const { dataset, warnings } = buildZbeDataset({ dgtFiles: [], osm: stray, restrictionTable: {}, provinces: CATALONIA, builtAt });
+
+    expect(dataset.zbes).toEqual([]);
+    expect(warnings).toEqual([expect.stringMatching(/osm:way\/1125257814.*closed/)]);
+  });
+});
+
+describe("ZBE dataset build, disputed areas", () => {
+  /** In the ~2.2 ha that OSM's Mataró perimeter has and DGT's lacks, ~75 m from its edges. */
+  const MATARO_OSM_ONLY = { lng: 2.441836, lat: 41.540119 };
+
+  it("makes a DGT/OSM difference above the threshold a disputed area that counts as inside the ZBE", () => {
+    const { dataset } = buildZbeDataset({ dgtFiles: [mataro], osm: osmMataro, restrictionTable: {}, provinces: CATALONIA, builtAt });
+
+    const zbe = dataset.zbes.find((z) => z.id === "8121_ZBE Mataró")!;
+    expect(zbe.disputedAreas?.coordinates).toHaveLength(1);
+    expect(isInsideAnyZbe(MATARO_OSM_ONLY, dataset.zbes)).toBe(true);
+  });
+
+  it("leaves differences below the threshold undisputed", () => {
+    // Granollers' perimeters disagree only in slivers of at most ~0.3 ha.
+    const { dataset } = buildZbeDataset({ dgtFiles: [granollers], osm: osmGranollers, restrictionTable: {}, provinces: CATALONIA, builtAt });
+
+    expect(dataset.zbes[0]?.disputedAreas).toBeUndefined();
+  });
+
+  it("leaves a long, thin difference undisputed however large its area", () => {
+    // Granollers' perimeters disagree in strips 4–8 m wide; above 0.1 ha they pass on area alone.
+    const { dataset } = buildZbeDataset({
+      dgtFiles: [granollers],
+      osm: osmGranollers,
+      restrictionTable: {},
+      provinces: CATALONIA,
+      disputedAreaMinM2: 1_000,
+      builtAt,
+    });
+
+    expect(dataset.zbes[0]?.disputedAreas).toBeUndefined();
+  });
+
+  it("makes a disputed area settled inside part of the ZBE's perimeter", () => {
+    const settlements: Settlement[] = [
+      { zbe: "8121_ZBE Mataró", point: [MATARO_OSM_ONLY.lng, MATARO_OSM_ONLY.lat], verdict: "inside", note: "test" },
+    ];
+
+    const { dataset } = buildZbeDataset({
+      dgtFiles: [mataro],
+      osm: osmMataro,
+      settlements,
+      restrictionTable: {},
+      provinces: CATALONIA,
+      builtAt,
+    });
+
+    const zbe = dataset.zbes[0]!;
+    expect(zbe.disputedAreas).toBeUndefined();
+    expect(isInsideAnyZbe(MATARO_OSM_ONLY, [zbe])).toBe(true);
+  });
+
+  it("leaves a disputed area settled outside out of the ZBE", () => {
+    const settlements: Settlement[] = [
+      { zbe: "8121_ZBE Mataró", point: [MATARO_OSM_ONLY.lng, MATARO_OSM_ONLY.lat], verdict: "outside", note: "test" },
+    ];
+
+    const { dataset } = buildZbeDataset({
+      dgtFiles: [mataro],
+      osm: osmMataro,
+      settlements,
+      restrictionTable: {},
+      provinces: CATALONIA,
+      builtAt,
+    });
+
+    expect(dataset.zbes[0]?.disputedAreas).toBeUndefined();
+    expect(isInsideAnyZbe(MATARO_OSM_ONLY, dataset.zbes)).toBe(false);
+  });
+
+  it("cuts a disputed area that only DGT has out of the ZBE when it is settled outside", () => {
+    // With the thresholds lowered, Granollers' ~0.13 ha, ~8 m wide sliver on its east edge, which only DGT includes, is disputed.
+    const granollersDgtOnly = { lng: 2.290664, lat: 41.608863 };
+    const granollersMiddle = { lng: 2.286784, lat: 41.605913 };
+    const build = (settlements: Settlement[]) =>
+      buildZbeDataset({
+        dgtFiles: [granollers],
+        osm: osmGranollers,
+        settlements,
+        restrictionTable: {},
+        provinces: CATALONIA,
+        disputedAreaMinM2: 1_000,
+        disputedAreaMinWidthM: 0,
+        builtAt,
+      }).dataset.zbes;
+
+    const unsettled = build([]);
+    const settled = build([
+      { zbe: "8096_Granollers", point: [granollersDgtOnly.lng, granollersDgtOnly.lat], verdict: "outside", note: "test" },
+    ]);
+
+    expect(isInsideAnyZbe(granollersDgtOnly, unsettled)).toBe(true);
+    expect(isInsideAnyZbe(granollersDgtOnly, settled)).toBe(false);
+    expect(isInsideAnyZbe(granollersMiddle, settled)).toBe(true);
+  });
+
+  it("warns about a settlement that matches no disputed area", () => {
+    // Once OSM or DGT is corrected the disputed area goes away, and its settlement is stale.
+    const { warnings } = buildZbeDataset({
+      dgtFiles: [mataro],
+      osm: osmMataro,
+      settlements: [{ zbe: "8121_ZBE Mataró", point: [2.445963, 41.539941], verdict: "outside", note: "test" }],
+      restrictionTable: {},
+      provinces: CATALONIA,
+      builtAt,
+    });
+
+    expect(warnings).toContainEqual(expect.stringMatching(/8121_ZBE Mataró.*2\.445963.*settlement/));
+  });
+});
+
+/** An Overpass extract holding one closed way. */
+function osmWay(id: number, tags: Record<string, string>, ring: [number, number][]) {
+  return { elements: [{ type: "way", id, tags, geometry: ring.map(([lon, lat]) => ({ lat, lon })) }] };
+}

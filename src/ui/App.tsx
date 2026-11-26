@@ -172,8 +172,10 @@ export function App() {
       </section>
 
       <footer className="attribution">
-        ZBE perimeters from the <a href="https://nap.dgt.es/en/dataset/zonas-de-bajas-emisiones">DGT NAP</a> (CC BY
-        4.0). Transit and driving times by <a href="https://transitous.org/sources/">Transitous</a> and its data sources. Map
+        <span className="legend-disputed" aria-hidden="true" /> Dashed areas: the DGT and OSM perimeters disagree, so
+        they count as inside the ZBE. ZBE perimeters from the{" "}
+        <a href="https://nap.dgt.es/en/dataset/zonas-de-bajas-emisiones">DGT NAP</a> (CC BY 4.0) and OpenStreetMap
+        (ODbL). Transit and driving times by <a href="https://transitous.org/sources/">Transitous</a> and its data sources. Map
         data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, tiles by{" "}
         <a href="https://openfreemap.org">OpenFreeMap</a>.
       </footer>

@@ -12,8 +12,26 @@ maplibregl.setWorkerUrl(workerUrl);
 const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
 const BARCELONA: [number, number] = [2.12, 41.41];
 const ZBE_SOURCE = "zbes";
+const DISPUTED_SOURCE = "zbe-disputed-areas";
 /** Fixed rather than themed: the base map is light in both colour schemes. */
 const ZBE_COLOR = "#c2410c";
+/** Disputed areas count as inside, so they share the ZBE's hue, darker, hatched and dashed to stand out. */
+const DISPUTED_RGB: [number, number, number] = [124, 45, 18];
+const DISPUTED_COLOR = `rgb(${DISPUTED_RGB.join(" ")})`;
+const DISPUTED_HATCH = "zbe-disputed-hatch";
+
+/** A tile of diagonal stripes in the given colour, for a hatched fill. */
+function hatch([r, g, b]: [number, number, number]): { width: number; height: number; data: Uint8Array } {
+  const size = 8;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const onStripe = (x + y) % size < 2;
+      data.set(onStripe ? [r, g, b, 170] : [r, g, b, 25], (y * size + x) * 4);
+    }
+  }
+  return { width: size, height: size, data };
+}
 
 export interface MapViewProps {
   origin: LatLng | null;
@@ -102,18 +120,29 @@ export function MapView(props: MapViewProps) {
   return <div ref={container} className="map" role="region" aria-label="Map" />;
 }
 
-/** Draws every ZBE perimeter, beneath the base map's labels so place names stay readable. */
+/**
+ * Draws every ZBE perimeter, and over it each disputed area (DGT and OSM disagree there, so it
+ * counts as inside), beneath the base map's labels so place names stay readable.
+ */
 function showZbes(m: maplibregl.Map, zbes: Zbe[]) {
-  const data: FeatureCollection = {
+  const perimeters: FeatureCollection = {
     type: "FeatureCollection",
     features: zbes.map((z) => ({ type: "Feature", properties: { name: z.name }, geometry: z.perimeter })),
   };
+  const disputed: FeatureCollection = {
+    type: "FeatureCollection",
+    features: zbes.flatMap((z) =>
+      z.disputedAreas ? [{ type: "Feature" as const, properties: { name: z.name }, geometry: z.disputedAreas }] : [],
+    ),
+  };
   const source = m.getSource<maplibregl.GeoJSONSource>(ZBE_SOURCE);
   if (source) {
-    source.setData(data);
+    source.setData(perimeters);
+    m.getSource<maplibregl.GeoJSONSource>(DISPUTED_SOURCE)?.setData(disputed);
     return;
   }
-  m.addSource(ZBE_SOURCE, { type: "geojson", data });
+  m.addSource(ZBE_SOURCE, { type: "geojson", data: perimeters });
+  m.addSource(DISPUTED_SOURCE, { type: "geojson", data: disputed });
   const firstLabels = m.getStyle().layers.find((l) => l.type === "symbol")?.id;
   m.addLayer(
     { id: "zbe-fill", type: "fill", source: ZBE_SOURCE, paint: { "fill-color": ZBE_COLOR, "fill-opacity": 0.12 } },
@@ -125,6 +154,25 @@ function showZbes(m: maplibregl.Map, zbes: Zbe[]) {
       type: "line",
       source: ZBE_SOURCE,
       paint: { "line-color": ZBE_COLOR, "line-width": 1.5, "line-opacity": 0.8 },
+    },
+    firstLabels,
+  );
+  m.addImage(DISPUTED_HATCH, hatch(DISPUTED_RGB));
+  m.addLayer(
+    {
+      id: "zbe-disputed-fill",
+      type: "fill",
+      source: DISPUTED_SOURCE,
+      paint: { "fill-pattern": DISPUTED_HATCH },
+    },
+    firstLabels,
+  );
+  m.addLayer(
+    {
+      id: "zbe-disputed-outline",
+      type: "line",
+      source: DISPUTED_SOURCE,
+      paint: { "line-color": DISPUTED_COLOR, "line-width": 1.5, "line-dasharray": [2, 1.5] },
     },
     firstLabels,
   );

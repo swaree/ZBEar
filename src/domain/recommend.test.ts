@@ -134,6 +134,25 @@ describe("recommend", () => {
     expect(recommendation.options.map((o) => o.candidate.id)).toEqual(["outside"]);
   });
 
+  it("treats a ZBE's disputed areas as inside it", async () => {
+    const zbe: Zbe = {
+      ...squareZbe("one", { lat: 41.4, lng: 2.0, side: 0.02 }),
+      // Where OSM draws the ZBE ~1 km further north than DGT does.
+      disputedAreas: squareZbe("disputed", { lat: 41.42, lng: 2.0, side: 0.01 }).perimeter,
+    };
+    const inDisputedArea = candidate("in-disputed-area", 41.425, 3);
+    const outside = candidate("outside", 41.45, 3);
+    const all = [inDisputedArea, outside];
+    const engine = fakeRoutingEngine({
+      driveFromOrigin: all.map((c) => [c.location, min(10)]),
+      transitToDestination: all.map((c) => [c.location, { durationS: min(20), transfers: 0 }]),
+    });
+
+    const recommendation = await recommend({ origin, destination, arriveBy }, all, { zbes: [zbe] }, engine);
+
+    expect(recommendation.options.map((o) => o.candidate.id)).toEqual(["outside"]);
+  });
+
   it("compares each Option with the Baseline: the whole Trip by transit from the Origin", async () => {
     const fast = candidate("fast", 41.41, 3);
     const slow = candidate("slow", 41.42, 3);

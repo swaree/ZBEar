@@ -264,6 +264,16 @@ a {
   font-size: 0.75rem;
 }
 
+/* A swatch matching the map's disputed areas (DISPUTED_COLOR in MapView). */
+.legend-disputed {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  vertical-align: middle;
+  border: 1.5px dashed #7c2d12;
+  background: repeating-linear-gradient(-45deg, rgb(124 45 18 / 67%) 0 1.5px, rgb(124 45 18 / 10%) 1.5px 5px);
+}
+
 .baseline {
   margin: 0 0 12px;
   padding: 10px 12px;

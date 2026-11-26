@@ -31,6 +31,11 @@ export interface Zbe {
   id: string;
   name: string;
   perimeter: MultiPolygon;
+  /**
+   * Where the DGT and OSM perimeters disagree and no settlement has decided yet. They count as
+   * inside the ZBE, so doubt resolves on the safe side. Absent when there are none.
+   */
+  disputedAreas?: MultiPolygon;
   restrictionWindow: RestrictionWindow;
   barredLabels: EnvironmentalLabel[];
 }
@@ -42,13 +47,17 @@ export interface ZbeDataset {
   zbes: Zbe[];
 }
 
-/** Whether a point lies inside any ZBE's perimeter (on the boundary counts as either). */
+/** Whether a point lies inside any ZBE's perimeter or disputed areas (on the boundary counts as either). */
 export function isInsideAnyZbe(point: LatLng, zbes: Zbe[]): boolean {
-  return zbes.some((zbe) => zbe.perimeter.coordinates.some((polygon) => isInsidePolygon(point.lng, point.lat, polygon)));
+  return zbes.some((zbe) =>
+    [...zbe.perimeter.coordinates, ...(zbe.disputedAreas?.coordinates ?? [])].some((polygon) =>
+      isInsidePolygon(point.lng, point.lat, polygon),
+    ),
+  );
 }
 
 /** Even-odd ray casting in plain lng/lat, which is accurate enough at the scale of a city. */
-function isInsidePolygon(x: number, y: number, rings: [number, number][][]): boolean {
+export function isInsidePolygon(x: number, y: number, rings: [number, number][][]): boolean {
   let inside = false;
   for (const ring of rings) {
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
