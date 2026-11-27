@@ -6,6 +6,7 @@ import type { RoutingEngine, TimedPoint, TrafficDrive } from "./RoutingEngine";
  * Terms: results may not be cached or stored, so they live only within the query (and the browser is
  * told not to cache them either), and "© Mapbox" with the logo must be shown wherever they are used.
  * Without a payment method the account is on demo access, so going over the free cap fails requests.
+ * Every drive avoids toll roads, without exception: a drive Mapbox can only make on one counts as no route.
  */
 export function mapboxEngine(opts: {
   token: string | undefined;
@@ -24,6 +25,7 @@ export function mapboxEngine(opts: {
       url.searchParams.set("overview", "full");
       url.searchParams.set("geometries", "geojson");
       url.searchParams.set("annotations", "duration");
+      url.searchParams.set("exclude", "toll");
       // Mapbox only predicts traffic ahead; a departure already past means "now", its default.
       if (departAt > now()) url.searchParams.set("depart_at", departAt.toISOString().slice(0, 19) + "Z");
 
@@ -34,7 +36,10 @@ export function mapboxEngine(opts: {
         throw new Error(`Mapbox request failed: ${res.status} ${body.message ?? body.code ?? ""}`.trim());
       }
       const route = body.routes?.[0];
-      return route ? trafficDrive(route) : null;
+      // Exclusions are best-effort: when no toll-free drive exists, Mapbox returns one with a toll
+      // anyway and flags it (a "violation", or an "alert" that the route uses a toll road).
+      if (!route || usesTollRoad(route)) return null;
+      return trafficDrive(route);
     },
   };
 }
@@ -53,8 +58,12 @@ interface MapboxRoute {
   duration: number;
   distance: number;
   geometry: { coordinates: [number, number][] };
-  legs: { annotation?: { duration?: number[] } }[];
+  legs: { annotation?: { duration?: number[] }; notifications?: { type: string; subtype?: string }[] }[];
 }
+
+/** Whether Mapbox flags any stretch of the route as a toll road. */
+const usesTollRoad = (route: MapboxRoute) =>
+  route.legs.some((leg) => leg.notifications?.some((n) => n.subtype === "toll"));
 
 /** Times the route's geometry with its per-segment durations: one per pair of consecutive coordinates. */
 function trafficDrive(route: MapboxRoute): TrafficDrive {

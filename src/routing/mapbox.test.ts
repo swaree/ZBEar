@@ -3,6 +3,7 @@ import { mapboxEngine } from "./mapbox";
 import drivingTraffic from "./recorded/mapbox-driving-traffic.json";
 import invalidToken from "./recorded/mapbox-invalid-token.json";
 import noRoute from "./recorded/mapbox-no-route.json";
+import tollRoad from "./recorded/mapbox-toll-road.json";
 
 /** Serves one recorded response and remembers what was requested. */
 function recordedFetch(body: unknown, status = 200) {
@@ -21,7 +22,7 @@ const departAt = new Date("2026-11-27T08:00:00+01:00");
 const before = () => new Date("2026-11-26T18:00:00+01:00");
 
 describe("Mapbox adapter (recorded responses)", () => {
-  it("asks for a drive with traffic departing at the given time, with the timed full path, never cached", async () => {
+  it("asks for a drive with traffic departing at the given time, avoiding tolls, with the timed full path, never cached", async () => {
     const { fetchFn, calls } = recordedFetch(drivingTraffic);
     const engine = mapboxEngine({ token: "pk.test", fetch: fetchFn, now: before });
 
@@ -37,6 +38,7 @@ describe("Mapbox adapter (recorded responses)", () => {
       overview: "full",
       geometries: "geojson",
       annotations: "duration",
+      exclude: "toll",
       depart_at: "2026-11-27T07:00:00Z",
     });
     expect(init?.cache).toBe("no-store");
@@ -65,6 +67,33 @@ describe("Mapbox adapter (recorded responses)", () => {
     expect(path.at(-1)).toMatchObject({ lat: 41.387256, lng: 2.169749 });
     expect(path.at(-1)!.atS).toBeCloseTo(2295.9, 1);
     expect(path.every((p, i) => i === 0 || p.atS >= path[i - 1]!.atS)).toBe(true);
+  });
+
+  it("reports no route when the drive still uses a toll road", async () => {
+    // Recorded without exclude=toll: Plaça Catalunya to Sant Cugat through the Vallvidrera toll tunnels,
+    // which Mapbox flags with a toll alert. Exclusions are best-effort, so a drive could come back like this.
+    const { fetchFn } = recordedFetch(tollRoad);
+    const engine = mapboxEngine({ token: "pk.test", fetch: fetchFn, now: before });
+
+    expect(await engine.driveWithTraffic(destination, { lat: 41.473, lng: 2.084 }, departAt)).toBeNull();
+  });
+
+  it("reports no route when Mapbox says it couldn't avoid the tolls", async () => {
+    // The violation notification as Mapbox documents it, on an otherwise toll-free recorded drive.
+    const [route] = drivingTraffic.routes;
+    const violation = {
+      type: "violation",
+      subtype: "toll",
+      refresh_type: "static",
+      geometry_index_start: 2,
+      geometry_index_end: 3,
+      details: { message: "Toll avoidance not possible - the route uses a toll road." },
+    };
+    const body = { ...drivingTraffic, routes: [{ ...route, legs: route!.legs.map((leg) => ({ ...leg, notifications: [violation] })) }] };
+    const { fetchFn } = recordedFetch(body);
+    const engine = mapboxEngine({ token: "pk.test", fetch: fetchFn, now: before });
+
+    expect(await engine.driveWithTraffic(station, destination, departAt)).toBeNull();
   });
 
   it("reports no route when Mapbox finds none", async () => {

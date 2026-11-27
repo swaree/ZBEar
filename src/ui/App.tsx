@@ -478,6 +478,9 @@ function OptionCard({
             <a href={wazeNavigationUrl(parking)} target="_blank" rel="noopener noreferrer">
               Waze
             </a>
+            <br />
+            {/* Neither app takes "avoid tolls" in a link, and each picks its own road. */}
+            <span className="hint">Turn on Avoid tolls in the app: it picks its own road, which may take one.</span>
           </p>
           {details === undefined ? (
             <p className="hint">Loading the transit steps…</p>
