@@ -730,7 +730,7 @@ describe("recommend: Return Leg", () => {
 
     const [option] = (await recommend(roundTrip, [a], noZbes, simpleRoundTrip(a))).options;
 
-    expect(option?.returnLeg).toEqual({
+    expect(option?.returnLeg).toMatchObject({
       transitS: min(40),
       transfers: 2,
       driveS: min(25),
@@ -839,6 +839,22 @@ describe("recommend: Return Leg", () => {
     const [option] = (await recommend(roundTrip, [a], noZbes, engine)).options;
 
     expect(option?.returnLeg?.driveS).toBe(min(22));
+  });
+
+  it("gives the Return Leg the road path of its drive back with traffic, the one checked against the ZBEs", async () => {
+    const a = candidate("a", 41.41, 3);
+    const engine = fakeRoutingEngine({
+      ...returnFake,
+      driveFromOrigin: [[a.location, min(20)]],
+      transitToDestination: [[a.location, { durationS: min(30), transfers: 0 }]],
+      transitFromDestination: [[a.location, { durationS: min(40), transfers: 0 }]],
+      driveToOrigin: [[a.location, min(20)]],
+      trafficDriveToOrigin: [[a.location, driveBack(a.location, 22, [41.5, 1.95, 10])]],
+    });
+
+    const [option] = (await recommend(roundTrip, [a], noZbes, engine)).options;
+
+    expect(option?.returnLeg?.drivePath).toEqual([a.location, { lat: 41.5, lng: 1.95 }, origin]);
   });
 
   it("leaves out Parking Candidates that transit or driving cannot reach on the way back", async () => {

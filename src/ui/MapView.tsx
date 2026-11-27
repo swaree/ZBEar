@@ -23,7 +23,9 @@ const DISPUTED_HATCH = "zbe-disputed-hatch";
 const CANDIDATE_SOURCE = "parking-candidates";
 /** Matches the light-scheme --candidate in styles.css: the base map is light in both schemes. */
 const CANDIDATE_COLOR = "#0f766e";
-const OUTBOUND_SOURCE = "outbound-leg";
+const DRAWN_SOURCE = "option-legs";
+/** How far each leg is drawn to its own right when both are drawn, in pixels, so they lie side by side. */
+const BOTH_LEGS_OFFSET_PX = 4;
 /** Matches --draw-drive, --draw-ride and --draw-walk in styles.css, for the legend. */
 const DRIVE_COLOR = "#334155";
 /** For a line whose operator gives no colour. */
@@ -43,8 +45,9 @@ function hatch([r, g, b]: [number, number, number]): { width: number; height: nu
   return { width: size, height: size, data };
 }
 
-/** One part of the selected Option's Outbound Leg (the drive, a walk or a ride), drawn in the style of how it is made. */
-export interface OutboundPart {
+/** One part of the selected Option (a drive, a walk or a ride) of one of its legs, drawn in the style of how it is made. */
+export interface DrawnPart {
+  leg: "outbound" | "return";
   mode: "drive" | TransitMode;
   path: LatLng[];
   /** A ride's line colour, as "#rrggbb"; null for the default. */
@@ -62,8 +65,8 @@ export interface MapViewProps {
   selectedId: string | null;
   /** The map fits these points whenever this array changes identity (e.g. after planning a Trip). */
   fitTo: LatLng[] | null;
-  /** The selected Option's Outbound Leg, part by part; empty when there is none to draw. */
-  outbound: OutboundPart[];
+  /** The selected Option's legs, part by part; empty when there is none to draw. */
+  drawn: DrawnPart[];
   onTap: (point: LatLng) => void;
   onOriginMoved: (point: LatLng) => void;
   onDestinationMoved: (point: LatLng) => void;
@@ -128,8 +131,8 @@ export function MapView(props: MapViewProps) {
   useEffect(() => {
     const m = map.current;
     if (!m || !styleReady) return;
-    showOutbound(m, props.outbound);
-  }, [props.outbound, styleReady]);
+    showDrawn(m, props.drawn);
+  }, [props.drawn, styleReady]);
 
   // Effects depend on the coordinates, not the LatLng object, so re-renders with an equal point do nothing.
   useEffect(() => {
@@ -248,17 +251,19 @@ function showCandidates(m: maplibregl.Map, candidates: ParkingCandidate[]) {
 }
 
 /** How each part is drawn: buses (coaches too) dashed, so they stand apart from rail, metro and tram. */
-function lineStyle(mode: OutboundPart["mode"]): "solid" | "dashed" | "dotted" {
+function lineStyle(mode: DrawnPart["mode"]): "solid" | "dashed" | "dotted" {
   if (mode === "walk") return "dotted";
   return mode === "bus" || mode === "coach" ? "dashed" : "solid";
 }
 
 /**
- * Draws the selected Option's Outbound Leg above the ZBEs and Parking Candidates, beneath the base map's labels:
- * the drive solid, each ride in its line's colour (solid, or dashed for a bus), each walk dotted. The drive
- * and rides have a white casing so they stand out from the roads beneath them.
+ * Draws the selected Option's legs above the ZBEs and Parking Candidates, beneath the base map's labels:
+ * the drives solid, each ride in its line's colour (solid, or dashed for a bus), each walk dotted. The drives
+ * and rides have a white casing so they stand out from the roads beneath them. With both legs drawn, each
+ * lies a little to its own right, so the way there and the way back along the same road sit side by side.
  */
-function showOutbound(m: maplibregl.Map, parts: OutboundPart[]) {
+function showDrawn(m: maplibregl.Map, parts: DrawnPart[]) {
+  const bothLegs = parts.some((part) => part.leg === "outbound") && parts.some((part) => part.leg === "return");
   const data: FeatureCollection = {
     type: "FeatureCollection",
     features: parts
@@ -267,62 +272,73 @@ function showOutbound(m: maplibregl.Map, parts: OutboundPart[]) {
         type: "Feature",
         properties: {
           style: lineStyle(part.mode),
+          offset: bothLegs ? BOTH_LEGS_OFFSET_PX : 0,
           color: part.mode === "drive" ? DRIVE_COLOR : part.mode === "walk" ? WALK_COLOR : (part.color ?? RIDE_COLOR),
         },
         geometry: { type: "LineString", coordinates: part.path.map(toLngLat) },
       })),
   };
-  const source = m.getSource<maplibregl.GeoJSONSource>(OUTBOUND_SOURCE);
+  const source = m.getSource<maplibregl.GeoJSONSource>(DRAWN_SOURCE);
   if (source) {
     source.setData(data);
     return;
   }
-  m.addSource(OUTBOUND_SOURCE, { type: "geojson", data });
+  m.addSource(DRAWN_SOURCE, { type: "geojson", data });
   const beneath = m.getStyle().layers.find((l) => l.type === "symbol")?.id;
   const styled = (style: ReturnType<typeof lineStyle>): maplibregl.FilterSpecification => ["==", ["get", "style"], style];
   const round = { "line-cap": "round", "line-join": "round" } as const;
   m.addLayer(
     {
-      id: `${OUTBOUND_SOURCE}-casing`,
+      id: `${DRAWN_SOURCE}-casing`,
       type: "line",
-      source: OUTBOUND_SOURCE,
+      source: DRAWN_SOURCE,
       filter: ["!=", ["get", "style"], "dotted"],
       layout: round,
-      paint: { "line-color": "#ffffff", "line-width": 8 },
+      paint: { "line-color": "#ffffff", "line-width": 8, "line-offset": ["get", "offset"] },
     },
     beneath,
   );
   m.addLayer(
     {
-      id: `${OUTBOUND_SOURCE}-solid`,
+      id: `${DRAWN_SOURCE}-solid`,
       type: "line",
-      source: OUTBOUND_SOURCE,
+      source: DRAWN_SOURCE,
       filter: styled("solid"),
       layout: round,
-      paint: { "line-color": ["get", "color"], "line-width": 5 },
+      paint: { "line-color": ["get", "color"], "line-width": 5, "line-offset": ["get", "offset"] },
     },
     beneath,
   );
   m.addLayer(
     {
-      id: `${OUTBOUND_SOURCE}-dashed`,
+      id: `${DRAWN_SOURCE}-dashed`,
       type: "line",
-      source: OUTBOUND_SOURCE,
+      source: DRAWN_SOURCE,
       filter: styled("dashed"),
       // Square-ended dashes; the white casing shows through the gaps.
       layout: { "line-cap": "butt", "line-join": "round" },
-      paint: { "line-color": ["get", "color"], "line-width": 5, "line-dasharray": [2, 1.2] },
+      paint: {
+        "line-color": ["get", "color"],
+        "line-width": 5,
+        "line-dasharray": [2, 1.2],
+        "line-offset": ["get", "offset"],
+      },
     },
     beneath,
   );
   m.addLayer(
     {
-      id: `${OUTBOUND_SOURCE}-walk`,
+      id: `${DRAWN_SOURCE}-walk`,
       type: "line",
-      source: OUTBOUND_SOURCE,
+      source: DRAWN_SOURCE,
       filter: styled("dotted"),
       layout: round,
-      paint: { "line-color": ["get", "color"], "line-width": 4, "line-dasharray": [0, 2] },
+      paint: {
+        "line-color": ["get", "color"],
+        "line-width": 4,
+        "line-dasharray": [0, 2],
+        "line-offset": ["get", "offset"],
+      },
     },
     beneath,
   );

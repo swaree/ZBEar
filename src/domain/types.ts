@@ -121,6 +121,8 @@ export interface OptionReturnLeg {
   transitS: number;
   transfers: number;
   driveS: number;
+  /** The road path of the drive back to the Origin: the drive with traffic that was checked against the ZBEs. */
+  drivePath: LatLng[];
   /** When the drive back starts from the parking. */
   driveFromParkingAt: Date;
   arriveOriginAt: Date;

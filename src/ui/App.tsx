@@ -22,7 +22,7 @@ import { mapboxEngine } from "../routing/mapbox";
 import type { RideMode, RoutingEngine, TransitItinerary } from "../routing/RoutingEngine";
 import { transitousEngine } from "../routing/transitous";
 import { formatDuration } from "./duration";
-import { MapView, type OutboundPart } from "./MapView";
+import { MapView, type DrawnPart } from "./MapView";
 import { googleMapsDrivingUrl, googleMapsTransitUrl, wazeNavigationUrl } from "./mapLinks";
 import { readTripReturn, type ReturnForm, type ReturnMode } from "./tripReturn";
 
@@ -39,7 +39,16 @@ const RETURN_MODES: { mode: ReturnMode; label: string }[] = [
 
 const NO_ZBES: Zbe[] = [];
 const NO_CANDIDATES: ParkingCandidate[] = [];
-const NO_PARTS: OutboundPart[] = [];
+const NO_PARTS: DrawnPart[] = [];
+
+/** Which of a round trip's legs the map draws. */
+type DrawnLegs = "both" | "outbound" | "return";
+
+const DRAWN_LEGS: { legs: DrawnLegs; label: string }[] = [
+  { legs: "both", label: "Both" },
+  { legs: "outbound", label: "Outbound" },
+  { legs: "return", label: "Return" },
+];
 
 /** An Option's details: undefined while they load, then what they are, or why they couldn't be had. */
 type DetailsState = OptionDetails | { error: string } | undefined;
@@ -59,6 +68,7 @@ export function App() {
   const [returnForm, setReturnForm] = useState<ReturnForm>({ mode: "none", getBackAt: "18:00", stayFor: "" });
   const [planned, setPlanned] = useState<{ trip: TripRequest; recommendation: Recommendation; fitTo: LatLng[] } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [drawnLegs, setDrawnLegs] = useState<DrawnLegs>("both");
   // Keyed by Parking Candidate id, for the Options of the planned Trip only.
   const [details, setDetails] = useState<ReadonlyMap<string, DetailsState>>(new Map());
   const [error, setError] = useState<string | null>(null);
@@ -110,13 +120,17 @@ export function App() {
 
   const selectedOption = planned?.recommendation.options.find((o) => o.candidate.id === selected);
   const selectedDetails = selected ? details.get(selected) : undefined;
-  // The drive is drawn as soon as the Option is selected; its walks and rides join once its details load.
-  const outboundParts = useMemo(
+  // The drives are drawn as soon as the Option is selected; its walks and rides join once its details load.
+  const drawnParts = useMemo(
     () =>
       selectedOption
-        ? outboundPartsOf(selectedOption, selectedDetails && !("error" in selectedDetails) ? selectedDetails : null)
+        ? drawnPartsOf(
+            selectedOption,
+            selectedDetails && !("error" in selectedDetails) ? selectedDetails : null,
+            selectedOption.returnLeg ? drawnLegs : "outbound",
+          )
         : NO_PARTS,
-    [selectedOption, selectedDetails],
+    [selectedOption, selectedDetails, drawnLegs],
   );
 
   const optionCandidates = useMemo(
@@ -283,6 +297,64 @@ export function App() {
 
       {error && <p className="error">Could not plan this Trip: {error}</p>}
 
+      <section className="map-panel">
+        <div className="tap-target" role="radiogroup" aria-label="Tap the map to set">
+          <span className="hint">Tap the map to set</span>
+          {(["origin", "destination"] as const).map((target) => (
+            <button
+              key={target}
+              type="button"
+              role="radio"
+              aria-checked={tapTarget === target}
+              className={tapTarget === target ? "active" : undefined}
+              onClick={() => setTapTarget(target)}
+            >
+              {target === "origin" ? "Origin" : "Destination"}
+            </button>
+          ))}
+        </div>
+        <div className="map-wrap">
+          <MapView
+            origin={origin}
+            destination={destination}
+            candidates={candidates ?? NO_CANDIDATES}
+            optionCandidates={optionCandidates}
+            zbes={zbes ?? NO_ZBES}
+            selectedId={selected}
+            fitTo={planned?.fitTo ?? null}
+            drawn={drawnParts}
+            onTap={onMapTap}
+            onOriginMoved={(p) => setOriginText(formatLatLng(p))}
+            onDestinationMoved={(p) => setDestinationText(formatLatLng(p))}
+          />
+          {selectedOption && (
+            <div className="map-overlay">
+              {selectedOption.returnLeg && (
+                <div className="map-toggle" role="radiogroup" aria-label="Draw">
+                  {DRAWN_LEGS.map(({ legs, label }) => (
+                    <button
+                      key={legs}
+                      type="button"
+                      role="radio"
+                      aria-checked={drawnLegs === legs}
+                      className={drawnLegs === legs ? "active" : undefined}
+                      onClick={() => setDrawnLegs(legs)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="drawn-legend">
+                <span className="legend-drive" aria-hidden="true" /> drive <span className="legend-ride" aria-hidden="true" />{" "}
+                rail, metro, tram <span className="legend-bus" aria-hidden="true" /> bus{" "}
+                <span className="legend-walk" aria-hidden="true" /> walk
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+
       {planned && (
         <section className={outdated ? "results outdated" : "results"}>
           {outdated && (
@@ -322,43 +394,6 @@ export function App() {
         </section>
       )}
 
-      <section className="map-panel">
-        <div className="tap-target" role="radiogroup" aria-label="Tap the map to set">
-          <span className="hint">Tap the map to set</span>
-          {(["origin", "destination"] as const).map((target) => (
-            <button
-              key={target}
-              type="button"
-              role="radio"
-              aria-checked={tapTarget === target}
-              className={tapTarget === target ? "active" : undefined}
-              onClick={() => setTapTarget(target)}
-            >
-              {target === "origin" ? "Origin" : "Destination"}
-            </button>
-          ))}
-        </div>
-        <MapView
-          origin={origin}
-          destination={destination}
-          candidates={candidates ?? NO_CANDIDATES}
-          optionCandidates={optionCandidates}
-          zbes={zbes ?? NO_ZBES}
-          selectedId={selected}
-          fitTo={planned?.fitTo ?? null}
-          outbound={outboundParts}
-          onTap={onMapTap}
-          onOriginMoved={(p) => setOriginText(formatLatLng(p))}
-          onDestinationMoved={(p) => setDestinationText(formatLatLng(p))}
-        />
-        {outboundParts.length > 0 && (
-          <p className="outbound-legend hint">
-            <span className="legend-drive" aria-hidden="true" /> drive <span className="legend-ride" aria-hidden="true" />{" "}
-            train, metro or tram <span className="legend-bus" aria-hidden="true" /> bus{" "}
-            <span className="legend-walk" aria-hidden="true" /> walk. Rides take their line's colour.
-          </p>
-        )}
-      </section>
 
       <footer className="attribution">
         <span className="legend-disputed" aria-hidden="true" /> Dashed areas: the DGT and OSM perimeters disagree, so
@@ -391,7 +426,7 @@ function OptionCard({
   const parking = option.candidate.location;
   return (
     <li className={["option", selected && "selected", conflicting && "conflicting"].filter(Boolean).join(" ")}>
-      <button type="button" onClick={onSelect} aria-pressed={selected}>
+      <button type="button" onClick={onSelect} aria-pressed={selected} aria-expanded={selected}>
         <div className="option-head">
           <span className="option-name">{option.candidate.name}</span>
           <span className="option-total">
@@ -429,35 +464,37 @@ function OptionCard({
           </p>
         ))}
       </button>
-      <div className="option-details">
-        <p className="navigate">
-          Navigate to the parking:{" "}
-          <a href={googleMapsDrivingUrl(parking)} target="_blank" rel="noopener noreferrer">
-            Google Maps
-          </a>{" "}
-          ·{" "}
-          <a href={wazeNavigationUrl(parking)} target="_blank" rel="noopener noreferrer">
-            Waze
-          </a>
-        </p>
-        {details === undefined ? (
-          <p className="hint">Loading the transit steps…</p>
-        ) : "error" in details ? (
-          <p className="hint">Could not load the transit steps ({details.error}).</p>
-        ) : (
-          <>
-            <TransitSteps
-              title="To the Destination"
-              itinerary={details.transitThere}
-              start="the parking"
-              end="the Destination"
-            />
-            {option.returnLeg && (
-              <TransitSteps title="Back" itinerary={details.transitBack} start="the Destination" end="the parking" />
-            )}
-          </>
-        )}
-      </div>
+      {selected && (
+        <div className="option-details">
+          <p className="navigate">
+            Navigate to the parking:{" "}
+            <a href={googleMapsDrivingUrl(parking)} target="_blank" rel="noopener noreferrer">
+              Google Maps
+            </a>{" "}
+            ·{" "}
+            <a href={wazeNavigationUrl(parking)} target="_blank" rel="noopener noreferrer">
+              Waze
+            </a>
+          </p>
+          {details === undefined ? (
+            <p className="hint">Loading the transit steps…</p>
+          ) : "error" in details ? (
+            <p className="hint">Could not load the transit steps ({details.error}).</p>
+          ) : (
+            <>
+              <TransitSteps
+                title="To the Destination"
+                itinerary={details.transitThere}
+                start="the parking"
+                end="the Destination"
+              />
+              {option.returnLeg && (
+                <TransitSteps title="Back" itinerary={details.transitBack} start="the Destination" end="the parking" />
+              )}
+            </>
+          )}
+        </div>
+      )}
     </li>
   );
 }
@@ -537,16 +574,27 @@ function lineBadgeStyle(color: string | null): { background: string; color: stri
 }
 
 /**
- * What the map draws of an Option's Outbound Leg: the drive to the parking (the one checked against the
- * ZBEs), then, once its details are in, each walk and ride to the Destination.
+ * What the map draws of an Option: each drive (the ones checked against the ZBEs) and, once its details
+ * are in, each walk and ride; of the Outbound Leg, the Return Leg, or both.
  */
-function outboundPartsOf(option: Option, details: OptionDetails | null): OutboundPart[] {
-  return [
-    { mode: "drive", path: option.drivePath, color: null },
-    ...(details?.transitThere?.legs ?? []).map(
-      (leg): OutboundPart => ({ mode: leg.mode, path: leg.path, color: leg.mode === "walk" ? null : leg.color }),
-    ),
+function drawnPartsOf(option: Option, details: OptionDetails | null, legs: DrawnLegs): DrawnPart[] {
+  const ridden = (leg: DrawnPart["leg"], itinerary: TransitItinerary | null | undefined) =>
+    (itinerary?.legs ?? []).map(
+      (step): DrawnPart => ({ leg, mode: step.mode, path: step.path, color: step.mode === "walk" ? null : step.color }),
+    );
+  const outbound: DrawnPart[] = [
+    { leg: "outbound", mode: "drive", path: option.drivePath, color: null },
+    ...ridden("outbound", details?.transitThere),
   ];
+  const back: DrawnPart[] = option.returnLeg
+    ? [
+        ...ridden("return", details?.transitBack),
+        { leg: "return", mode: "drive", path: option.returnLeg.drivePath, color: null },
+      ]
+    : [];
+  if (legs === "outbound") return outbound;
+  if (legs === "return") return back;
+  return [...outbound, ...back];
 }
 
 function conflictText(conflict: ParkingConflict, arrival: Date): string {

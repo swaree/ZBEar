@@ -140,6 +140,7 @@ export async function recommend(
         transitS: back.transit.durationS,
         transfers: back.transit.transfers,
         driveS: back.drive.durationS,
+        drivePath: pathOf(back.drive),
         driveFromParkingAt: back.departAt,
         arriveOriginAt: new Date(back.departAt.getTime() + back.drive.durationS * 1000),
       };
@@ -152,7 +153,7 @@ export async function recommend(
     options.push({
       candidate,
       driveS: driveThere.durationS,
-      drivePath: driveThere.path.map(({ lat, lng }) => ({ lat, lng })),
+      drivePath: pathOf(driveThere),
       timeToFindSpaceS: candidate.timeToFindSpaceS,
       transitS: transitThere.durationS,
       transfers: transitThere.transfers,
@@ -260,6 +261,9 @@ export function returnStartsAt(trip: Pick<TripRequest, "arriveBy" | "return">): 
   if (!back) return null;
   return "getBackAt" in back ? back.getBackAt : new Date(trip.arriveBy.getTime() + back.stayForS * 1000);
 }
+
+/** A drive's road path, untimed. */
+const pathOf = (drive: TrafficDrive) => drive.path.map(({ lat, lng }) => ({ lat, lng }));
 
 /** A drive's path with the clock time the car passes each point, given when the drive departs. */
 function timed(drive: TrafficDrive, departAtMs: number) {
