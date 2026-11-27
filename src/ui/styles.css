@@ -52,11 +52,32 @@ a {
   color: var(--accent);
 }
 
+/*
+ * Two panes filling the screen: the panel (form, Options, details) scrolls; the map holds still, in the
+ * bottom half on a phone and the right half on a wide screen. The page itself never scrolls.
+ */
 .app {
-  max-width: 720px;
-  margin: 0 auto;
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  overflow: hidden;
+}
+
+@media (min-width: 800px) {
+  .app {
+    grid-template-rows: none;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.panel {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px;
   display: grid;
+  align-content: start;
   gap: 16px;
 }
 
@@ -303,19 +324,28 @@ a {
   font-size: 0.875rem;
 }
 
-/* The map stays in view while the Options scroll beneath it, so selecting one shows it drawn. */
 .map-panel {
-  display: grid;
-  gap: 8px;
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: 8px 0;
-  background: var(--bg);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+
+@media (min-width: 800px) {
+  .map-panel {
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+}
+
+.map-panel .tap-target {
+  padding: 8px 12px;
 }
 
 .map-wrap {
   position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Overlays on the map, which is light in both colour schemes, so their colours stay fixed. */
@@ -392,11 +422,8 @@ a {
 }
 
 .map {
-  height: 50vh;
-  height: 50dvh;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--border);
+  position: absolute;
+  inset: 0;
 }
 
 .marker {

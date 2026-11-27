@@ -193,109 +193,163 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
-        <h1>ZBEar</h1>
-        <p>Where to park outside the ZBE, and how to continue by transit.</p>
-      </header>
+      {/* Everything but the map scrolls in this panel; the map holds still beside or below it. */}
+      <div className="panel">
+        <header className="app-header">
+          <h1>ZBEar</h1>
+          <p>Where to park outside the ZBE, and how to continue by transit.</p>
+        </header>
 
-      <form className="trip-form" onSubmit={onSubmit}>
-        <label>
-          Origin <span className="hint">lat, lng</span>
-          <input
-            value={originText}
-            onChange={(e) => setOriginText(e.target.value)}
-            placeholder="41.40, 2.00"
-            inputMode="decimal"
-            aria-invalid={originText !== "" && !origin}
-          />
-        </label>
-        <label>
-          Destination <span className="hint">lat, lng</span>
-          <input
-            value={destinationText}
-            onChange={(e) => setDestinationText(e.target.value)}
-            placeholder="41.387, 2.170"
-            inputMode="decimal"
-            aria-invalid={destinationText !== "" && !destination}
-          />
-        </label>
-        <label>
-          Arrive by
-          <input type="datetime-local" value={arriveByText} onChange={(e) => setArriveByText(e.target.value)} />
-        </label>
-        <fieldset className="return">
-          <legend>
-            Return <span className="hint">optional: ranks by the round trip</span>
-          </legend>
-          <div className="segmented" role="radiogroup" aria-label="Return">
-            {RETURN_MODES.map(({ mode, label }) => (
-              <button
-                key={mode}
-                type="button"
-                role="radio"
-                aria-checked={returnForm.mode === mode}
-                className={returnForm.mode === mode ? "active" : undefined}
-                onClick={() => setReturnForm({ ...returnForm, mode })}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {returnForm.mode === "getBackAt" && (
-            <label>
-              Get back at <span className="hint">leave the Destination then; the next day if not after the arrival</span>
-              <input
-                type="time"
-                value={returnForm.getBackAt}
-                onChange={(e) => setReturnForm({ ...returnForm, getBackAt: e.target.value })}
-                aria-invalid={tripReturn === "invalid"}
-              />
-            </label>
+        <form className="trip-form" onSubmit={onSubmit}>
+          <label>
+            Origin <span className="hint">lat, lng</span>
+            <input
+              value={originText}
+              onChange={(e) => setOriginText(e.target.value)}
+              placeholder="41.40, 2.00"
+              inputMode="decimal"
+              aria-invalid={originText !== "" && !origin}
+            />
+          </label>
+          <label>
+            Destination <span className="hint">lat, lng</span>
+            <input
+              value={destinationText}
+              onChange={(e) => setDestinationText(e.target.value)}
+              placeholder="41.387, 2.170"
+              inputMode="decimal"
+              aria-invalid={destinationText !== "" && !destination}
+            />
+          </label>
+          <label>
+            Arrive by
+            <input type="datetime-local" value={arriveByText} onChange={(e) => setArriveByText(e.target.value)} />
+          </label>
+          <fieldset className="return">
+            <legend>
+              Return <span className="hint">optional: ranks by the round trip</span>
+            </legend>
+            <div className="segmented" role="radiogroup" aria-label="Return">
+              {RETURN_MODES.map(({ mode, label }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={returnForm.mode === mode}
+                  className={returnForm.mode === mode ? "active" : undefined}
+                  onClick={() => setReturnForm({ ...returnForm, mode })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {returnForm.mode === "getBackAt" && (
+              <label>
+                Get back at <span className="hint">leave the Destination then; the next day if not after the arrival</span>
+                <input
+                  type="time"
+                  value={returnForm.getBackAt}
+                  onChange={(e) => setReturnForm({ ...returnForm, getBackAt: e.target.value })}
+                  aria-invalid={tripReturn === "invalid"}
+                />
+              </label>
+            )}
+            {returnForm.mode === "stayFor" && (
+              <label>
+                Stay for <span className="hint">after the arrive-by time, e.g. 2h30 or 90 min</span>
+                <input
+                  value={returnForm.stayFor}
+                  onChange={(e) => setReturnForm({ ...returnForm, stayFor: e.target.value })}
+                  placeholder="2h30"
+                  aria-invalid={returnForm.stayFor !== "" && tripReturn === "invalid"}
+                />
+              </label>
+            )}
+            {returnStart && arriveBy && (
+              <span className="hint">Leaving the Destination {dayAndClock(returnStart, arriveBy)}</span>
+            )}
+          </fieldset>
+          <label>
+            Environmental Label <span className="hint">decides which ZBEs bar the car</span>
+            <select value={vehicleLabel} onChange={(e) => onVehicleLabelChange(e.target.value as EnvironmentalLabel)}>
+              {ENVIRONMENTAL_LABELS.map((label) => (
+                <option key={label} value={label}>
+                  {label === "none" ? "None" : label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {beyondHorizon && (
+            <p className="notice">
+              More than {TIMETABLE_HORIZON_DAYS} days ahead: some operators (notably Rodalies) may not have published
+              timetables yet, so Options using them may be missing.
+            </p>
           )}
-          {returnForm.mode === "stayFor" && (
-            <label>
-              Stay for <span className="hint">after the arrive-by time, e.g. 2h30 or 90 min</span>
-              <input
-                value={returnForm.stayFor}
-                onChange={(e) => setReturnForm({ ...returnForm, stayFor: e.target.value })}
-                placeholder="2h30"
-                aria-invalid={returnForm.stayFor !== "" && tripReturn === "invalid"}
-              />
-            </label>
+          {zbeError && <p className="error">Could not load the ZBEs ({zbeError}), so no Trip can be planned.</p>}
+          {candidateError && (
+            <p className="error">Could not load the Parking Candidates ({candidateError}), so no Trip can be planned.</p>
           )}
-          {returnStart && arriveBy && (
-            <span className="hint">Leaving the Destination {dayAndClock(returnStart, arriveBy)}</span>
-          )}
-        </fieldset>
-        <label>
-          Environmental Label <span className="hint">decides which ZBEs bar the car</span>
-          <select value={vehicleLabel} onChange={(e) => onVehicleLabelChange(e.target.value as EnvironmentalLabel)}>
-            {ENVIRONMENTAL_LABELS.map((label) => (
-              <option key={label} value={label}>
-                {label === "none" ? "None" : label}
-              </option>
-            ))}
-          </select>
-        </label>
-        {beyondHorizon && (
-          <p className="notice">
-            More than {TIMETABLE_HORIZON_DAYS} days ahead: some operators (notably Rodalies) may not have published
-            timetables yet, so Options using them may be missing.
-          </p>
-        )}
-        {zbeError && <p className="error">Could not load the ZBEs ({zbeError}), so no Trip can be planned.</p>}
-        {candidateError && (
-          <p className="error">Could not load the Parking Candidates ({candidateError}), so no Trip can be planned.</p>
-        )}
-        <button
-          type="submit"
-          disabled={!origin || !destination || !arriveBy || tripReturn === "invalid" || !zbes || !candidates || busy}
-        >
-          {busy ? "Planning…" : zbes && candidates ? "Find parking" : "Loading map data…"}
-        </button>
-      </form>
+          <button
+            type="submit"
+            disabled={!origin || !destination || !arriveBy || tripReturn === "invalid" || !zbes || !candidates || busy}
+          >
+            {busy ? "Planning…" : zbes && candidates ? "Find parking" : "Loading map data…"}
+          </button>
+        </form>
 
-      {error && <p className="error">Could not plan this Trip: {error}</p>}
+        {error && <p className="error">Could not plan this Trip: {error}</p>}
+
+        {planned && (
+          <section className={outdated ? "results outdated" : "results"}>
+            {outdated && (
+              <p className="notice">
+                The Origin, Destination, return or Environmental Label changed since planning: press Find parking again.
+              </p>
+            )}
+            <BaselineCard baseline={planned.recommendation.baseline} trip={planned.trip} />
+            {planned.recommendation.directDrive && (
+              <DirectDriveCard directDrive={planned.recommendation.directDrive} trip={planned.trip} />
+            )}
+            {planned.recommendation.options.length === 0 ? (
+              <p>
+                No Parking Candidate can reach this Destination by that time{planned.trip.return ? ", and back," : ""}{" "}
+                without driving through a ZBE that bars the car.
+              </p>
+            ) : (
+              <ol className="options">
+                {planned.recommendation.options.map((o, i, all) => (
+                  <Fragment key={o.candidate.id}>
+                    {o.parkingConflicts.length > 0 && !all[i - 1]?.parkingConflicts.length && (
+                      <li className="tier-divider">
+                        {i === 0 ? "Every Option's" : "Below, the"} Parking Conditions conflict with your stay
+                      </li>
+                    )}
+                    <OptionCard
+                      option={o}
+                      details={details.get(o.candidate.id)}
+                      arrival={planned.trip.arriveBy}
+                      selected={o.candidate.id === selected}
+                      onSelect={() => setSelected(o.candidate.id)}
+                    />
+                  </Fragment>
+                ))}
+              </ol>
+            )}
+          </section>
+        )}
+
+
+        <footer className="attribution">
+          <span className="legend-disputed" aria-hidden="true" /> Dashed areas: the DGT and OSM perimeters disagree, so
+          they count as inside the ZBE. ZBE perimeters from the{" "}
+          <a href="https://nap.dgt.es/en/dataset/zonas-de-bajas-emisiones">DGT NAP</a> (CC BY 4.0) and OpenStreetMap
+          (ODbL). Transit and free-flow driving times by <a href="https://transitous.org/sources/">Transitous</a> and its data
+          sources. Driving times with traffic: directions powered by{" "}
+          <a href="https://www.mapbox.com/about/maps">© Mapbox</a>. Map
+          data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, tiles by{" "}
+          <a href="https://openfreemap.org">OpenFreeMap</a>.
+        </footer>
+      </div>
 
       <section className="map-panel">
         <div className="tap-target" role="radiogroup" aria-label="Tap the map to set">
@@ -354,57 +408,6 @@ export function App() {
           )}
         </div>
       </section>
-
-      {planned && (
-        <section className={outdated ? "results outdated" : "results"}>
-          {outdated && (
-            <p className="notice">
-              The Origin, Destination, return or Environmental Label changed since planning: press Find parking again.
-            </p>
-          )}
-          <BaselineCard baseline={planned.recommendation.baseline} trip={planned.trip} />
-          {planned.recommendation.directDrive && (
-            <DirectDriveCard directDrive={planned.recommendation.directDrive} trip={planned.trip} />
-          )}
-          {planned.recommendation.options.length === 0 ? (
-            <p>
-              No Parking Candidate can reach this Destination by that time{planned.trip.return ? ", and back," : ""}{" "}
-              without driving through a ZBE that bars the car.
-            </p>
-          ) : (
-            <ol className="options">
-              {planned.recommendation.options.map((o, i, all) => (
-                <Fragment key={o.candidate.id}>
-                  {o.parkingConflicts.length > 0 && !all[i - 1]?.parkingConflicts.length && (
-                    <li className="tier-divider">
-                      {i === 0 ? "Every Option's" : "Below, the"} Parking Conditions conflict with your stay
-                    </li>
-                  )}
-                  <OptionCard
-                    option={o}
-                    details={details.get(o.candidate.id)}
-                    arrival={planned.trip.arriveBy}
-                    selected={o.candidate.id === selected}
-                    onSelect={() => setSelected(o.candidate.id)}
-                  />
-                </Fragment>
-              ))}
-            </ol>
-          )}
-        </section>
-      )}
-
-
-      <footer className="attribution">
-        <span className="legend-disputed" aria-hidden="true" /> Dashed areas: the DGT and OSM perimeters disagree, so
-        they count as inside the ZBE. ZBE perimeters from the{" "}
-        <a href="https://nap.dgt.es/en/dataset/zonas-de-bajas-emisiones">DGT NAP</a> (CC BY 4.0) and OpenStreetMap
-        (ODbL). Transit and free-flow driving times by <a href="https://transitous.org/sources/">Transitous</a> and its data
-        sources. Driving times with traffic: directions powered by{" "}
-        <a href="https://www.mapbox.com/about/maps">© Mapbox</a>. Map
-        data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, tiles by{" "}
-        <a href="https://openfreemap.org">OpenFreeMap</a>.
-      </footer>
     </div>
   );
 }
