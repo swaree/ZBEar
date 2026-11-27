@@ -25,6 +25,15 @@ const carParkWay = (id: number, lat: number, lon: number, tags: Record<string, s
   tags: { amenity: "parking", ...tags },
 });
 
+/** An underground or multi-storey car park's way in, which OSM sometimes maps instead of the car park itself. */
+const parkingEntrance = (id: number, lat: number, lon: number, tags: Record<string, string> = {}): OverpassPlace => ({
+  type: "node",
+  id,
+  lat,
+  lon,
+  tags: { amenity: "parking_entrance", parking: "underground", ...tags },
+});
+
 describe("Discovered Parking Candidates build", () => {
   it("publishes a public car park near a transit stop as a Discovered Parking Candidate", () => {
     const osm = {
@@ -286,6 +295,45 @@ describe("Discovered Parking Candidates build", () => {
     expect(first.dataset.candidates.map((c) => c.id)).toEqual(
       ["node/10", "relation/21", "way/11"].map((id) => `osm:${id}`),
     );
+  });
+
+  it("counts an underground car park that OSM maps only by its entrance, located at the way in", () => {
+    // Like Sabadell Nord's P+R: an entrance node, and no amenity=parking area.
+    const osm = {
+      elements: [
+        { type: "node", id: 2, lat: STATION.lat + 80 * M, lon: STATION.lon, tags: { railway: "station", name: "Sabadell Nord" } },
+        parkingEntrance(10, STATION.lat, STATION.lon, { access: "yes", fee: "yes" }),
+      ],
+    };
+
+    const { dataset } = buildParkingCandidates({ osm, zbes: [], builtAt });
+
+    expect(dataset.candidates).toEqual([
+      {
+        id: "osm:node/10",
+        name: "Car park near Sabadell Nord",
+        location: { lat: STATION.lat, lng: STATION.lon },
+        kind: "car-park",
+        conditions: { access: "yes", fee: "yes" },
+      },
+    ]);
+  });
+
+  it("merges an entrance into the car park it leads to, which keeps its name, Parking Conditions and ID", () => {
+    // The entrance node's ID sorts before the way's, but the car park itself is the better record.
+    const osm = {
+      elements: [
+        busStop(1, STATION.lat, STATION.lon),
+        carParkWay(500, STATION.lat + 60 * M, STATION.lon, { name: "Aparcament Estació", fee: "no" }),
+        parkingEntrance(10, STATION.lat + 20 * M, STATION.lon, { fee: "yes" }),
+      ],
+    };
+
+    const { dataset } = buildParkingCandidates({ osm, zbes: [], builtAt });
+
+    expect(dataset.candidates.map(({ id, name, conditions }) => ({ id, name, conditions }))).toEqual([
+      { id: "osm:way/500", name: "Aparcament Estació", conditions: { fee: "no" } },
+    ]);
   });
 
   it("names an unnamed car park after its nearest transit stop", () => {

@@ -61,7 +61,7 @@ export function buildParkingCandidates(input: {
   );
   const carParks = places.filter(
     ({ tags, location }) =>
-      tags.amenity === "parking" &&
+      isCarPark(tags) &&
       !PRIVATE_ACCESS.has(tags.access ?? "") &&
       !isInsideAnyZbe(location, input.zbes) &&
       stops.within(location).length > 0,
@@ -95,8 +95,8 @@ interface Place {
 
 /**
  * Merges car parks within `distanceM` of each other into one, which takes the place (name,
- * location, kind, Parking Conditions and ID) of the first of them: a P+R, else the lowest OSM
- * ID. New OSM elements get higher IDs, so mapping another car park nearby, or editing one,
+ * location, kind, Parking Conditions and ID) of the first of them: a P+R, else a car park mapped
+ * as such rather than by its entrance, else the lowest OSM ID. New OSM elements get higher IDs, so mapping another car park nearby, or editing one,
  * leaves the candidate's ID alone unless the newcomer is a P+R. Each car park joins the first
  * one near it rather than chaining through neighbours, so a row of car parks along a street
  * doesn't become one candidate a kilometre long. The result is in OSM ID order, whatever the
@@ -104,7 +104,11 @@ interface Place {
  */
 function mergeNeighbours(carParks: Place[], distanceM: number): Place[] {
   const isParkAndRide = (p: Place) => Number(kindOf(p.tags) === "park-and-ride");
-  const byPriority = [...carParks].sort((a, b) => isParkAndRide(b) - isParkAndRide(a) || compareIds(a.element, b.element));
+  const isWholeCarPark = (p: Place) => Number(p.tags.amenity === "parking");
+  const byPriority = [...carParks].sort(
+    (a, b) =>
+      isParkAndRide(b) - isParkAndRide(a) || isWholeCarPark(b) - isWholeCarPark(a) || compareIds(a.element, b.element),
+  );
   const index = new NearbyIndex(byPriority, distanceM);
   const merged = new Set<Place>();
   const kept: Place[] = [];
@@ -127,6 +131,14 @@ function locationOf(element: OverpassPlace): LatLng | null {
   if (element.lat != null && element.lon != null) return { lat: element.lat, lng: element.lon };
   return null;
 }
+
+/**
+ * OSM `amenity` values for a car park: the car park itself, or, for an underground or multi-storey one
+ * that is mapped only by it, its entrance. The build script's Overpass query asks for exactly these.
+ */
+export const CAR_PARK_AMENITIES = ["parking", "parking_entrance"];
+
+const isCarPark = (tags: Record<string, string>) => CAR_PARK_AMENITIES.includes(tags.amenity ?? "");
 
 function isTransitStop(tags: Record<string, string>): boolean {
   return Object.entries(TRANSIT_STOP_TAGS).some(([key, values]) => values.includes(tags[key] ?? ""));

@@ -8,20 +8,25 @@
  * Any fetch failure aborts the build, so the previously published dataset stays in place.
  */
 import { readFile, writeFile } from "node:fs/promises";
-import { buildParkingCandidates, TRANSIT_STOP_TAGS, type OverpassPlace } from "../src/dataset/buildParkingCandidates";
+import {
+  buildParkingCandidates,
+  CAR_PARK_AMENITIES,
+  TRANSIT_STOP_TAGS,
+  type OverpassPlace,
+} from "../src/dataset/buildParkingCandidates";
 import type { ZbeDataset } from "../src/domain/zbe";
 import { queryOverpass } from "./overpass";
 
 const ZBES = new URL("../public/data/zbes.json", import.meta.url);
 const OUTPUT = new URL("../public/data/parking-candidates.json", import.meta.url);
 /**
- * Every car park and every transit stop (any mode) in Catalonia. Nodes come with their
+ * Every car park (or car park entrance) and every transit stop (any mode) in Catalonia. Nodes come with their
  * position, ways and relations with their center: the build needs no more geometry than that.
  */
 const OSM_QUERY = `[out:json][timeout:300];
 area["ISO3166-2"="ES-CT"]["admin_level"="4"]->.catalonia;
 (
-  nwr["amenity"="parking"](area.catalonia);
+  nwr["amenity"~"^(${CAR_PARK_AMENITIES.join("|")})$"](area.catalonia);
 ${Object.entries(TRANSIT_STOP_TAGS)
   .map(([key, values]) => `  nwr["${key}"~"^(${values.join("|")})$"](area.catalonia);`)
   .join("\n")}
@@ -36,7 +41,7 @@ async function main() {
   if (zbes.zbes.length === 0) throw new Error(`${ZBES.pathname} has no ZBEs: run npm run data:zbes first`);
 
   const osm = { elements: await queryOverpass<OverpassPlace>(OSM_QUERY, "car parks or transit stops in Catalonia") };
-  const carParks = osm.elements.filter((e) => e.tags?.amenity === "parking").length;
+  const carParks = osm.elements.filter((e) => CAR_PARK_AMENITIES.includes(e.tags?.amenity ?? "")).length;
   if (carParks === 0) throw new Error("Overpass returned no car parks in Catalonia: has the query broken?");
 
   const { dataset } = buildParkingCandidates({ osm, zbes: zbes.zbes, builtAt: new Date() });
