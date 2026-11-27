@@ -68,6 +68,8 @@ export function App() {
   const [returnForm, setReturnForm] = useState<ReturnForm>({ mode: "none", getBackAt: "18:00", stayFor: "" });
   const [planned, setPlanned] = useState<{ trip: TripRequest; recommendation: Recommendation; fitTo: LatLng[] } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // Parking Candidates the traveller discarded for the planned Trip; planning it afresh forgets them.
+  const [discarded, setDiscarded] = useState<ReadonlySet<string>>(new Set());
   const [drawnLegs, setDrawnLegs] = useState<DrawnLegs>("both");
   // Keyed by Parking Candidate id, for the Options of the planned Trip only.
   const [details, setDetails] = useState<ReadonlyMap<string, DetailsState>>(new Map());
@@ -118,7 +120,11 @@ export function App() {
     };
   }, [planned, engine]);
 
-  const selectedOption = planned?.recommendation.options.find((o) => o.candidate.id === selected);
+  const shownOptions = useMemo(
+    () => planned?.recommendation.options.filter((o) => !discarded.has(o.candidate.id)) ?? [],
+    [planned, discarded],
+  );
+  const selectedOption = shownOptions.find((o) => o.candidate.id === selected);
   const selectedDetails = selected ? details.get(selected) : undefined;
   // The drives are drawn as soon as the Option is selected; its walks and rides join once its details load.
   const drawnParts = useMemo(
@@ -133,10 +139,7 @@ export function App() {
     [selectedOption, selectedDetails, drawnLegs],
   );
 
-  const optionCandidates = useMemo(
-    () => planned?.recommendation.options.map((o) => o.candidate) ?? NO_CANDIDATES,
-    [planned],
-  );
+  const optionCandidates = useMemo(() => shownOptions.map((o) => o.candidate), [shownOptions]);
 
   const origin = parseLatLng(originText);
   const destination = parseLatLng(destinationText);
@@ -172,15 +175,15 @@ export function App() {
     }
   }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!origin || !destination || !arriveBy || tripReturn === "invalid" || !zbes || !candidates) return;
+  /** Plans a Trip from every Parking Candidate but the discarded ones. */
+  async function plan(trip: TripRequest, excluding: ReadonlySet<string>) {
+    if (!zbes || !candidates) return;
     setBusy(true);
     setError(null);
     try {
-      const trip: TripRequest = { origin, destination, arriveBy, vehicleLabel, return: tripReturn ?? undefined };
-      const recommendation = await recommend(trip, candidates, { zbes }, engine);
-      const fitTo = [origin, destination, ...recommendation.options.map((o) => o.candidate.location)];
+      const offered = excluding.size > 0 ? candidates.filter((c) => !excluding.has(c.id)) : candidates;
+      const recommendation = await recommend(trip, offered, { zbes }, engine);
+      const fitTo = [trip.origin, trip.destination, ...recommendation.options.map((o) => o.candidate.location)];
       setDetails(new Map());
       setPlanned({ trip, recommendation, fitTo });
       setSelected(recommendation.options[0]?.candidate.id ?? null);
@@ -188,6 +191,26 @@ export function App() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!origin || !destination || !arriveBy || tripReturn === "invalid") return;
+    setDiscarded(new Set());
+    await plan({ origin, destination, arriveBy, vehicleLabel, return: tripReturn ?? undefined }, new Set());
+  }
+
+  /** Hides an Option; once every Option shown is discarded, plans the Trip again without them all. */
+  function onDiscard(id: string) {
+    if (!planned) return;
+    const next = new Set(discarded).add(id);
+    setDiscarded(next);
+    const remaining = planned.recommendation.options.filter((o) => !next.has(o.candidate.id));
+    if (remaining.length === 0) {
+      void plan(planned.trip, next);
+    } else if (selected === id) {
+      setSelected(remaining[0]!.candidate.id);
     }
   }
 
@@ -310,14 +333,17 @@ export function App() {
             {planned.recommendation.directDrive && (
               <DirectDriveCard directDrive={planned.recommendation.directDrive} trip={planned.trip} />
             )}
-            {planned.recommendation.options.length === 0 ? (
+            {busy && shownOptions.length === 0 && discarded.size > 0 ? (
+              <p className="hint">Every Option shown was discarded: finding other parking…</p>
+            ) : shownOptions.length === 0 ? (
               <p>
-                No Parking Candidate can reach this Destination by that time{planned.trip.return ? ", and back," : ""}{" "}
-                without driving through a ZBE that bars the car.
+                No {discarded.size > 0 ? "other " : ""}Parking Candidate can reach this Destination by that time
+                {planned.trip.return ? ", and back," : ""} without driving through a ZBE that bars the car.
+                {discarded.size > 0 && <span className="hint"> ({discarded.size} discarded: press Find parking to bring them back.)</span>}
               </p>
             ) : (
               <ol className="options">
-                {planned.recommendation.options.map((o, i, all) => (
+                {shownOptions.map((o, i, all) => (
                   <Fragment key={o.candidate.id}>
                     {o.parkingConflicts.length > 0 && !all[i - 1]?.parkingConflicts.length && (
                       <li className="tier-divider">
@@ -330,10 +356,17 @@ export function App() {
                       arrival={planned.trip.arriveBy}
                       selected={o.candidate.id === selected}
                       onSelect={() => setSelected(o.candidate.id)}
+                      onDiscard={() => onDiscard(o.candidate.id)}
                     />
                   </Fragment>
                 ))}
               </ol>
+            )}
+            {discarded.size > 0 && shownOptions.length > 0 && (
+              <p className="hint">
+                {discarded.size} discarded. Discard every Option shown to find others; press Find parking to bring them
+                back.
+              </p>
             )}
           </section>
         )}
@@ -418,12 +451,14 @@ function OptionCard({
   arrival,
   selected,
   onSelect,
+  onDiscard,
 }: {
   option: Option;
   details: DetailsState;
   arrival: Date;
   selected: boolean;
   onSelect: () => void;
+  onDiscard: () => void;
 }) {
   const conflicting = option.parkingConflicts.length > 0;
   const parking = option.candidate.location;
@@ -501,6 +536,11 @@ function OptionCard({
           )}
         </div>
       )}
+      <div className="option-actions">
+        <button type="button" className="discard" onClick={onDiscard}>
+          Discard
+        </button>
+      </div>
     </li>
   );
 }

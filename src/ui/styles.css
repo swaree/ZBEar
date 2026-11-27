@@ -229,6 +229,27 @@ a {
   border-style: dashed;
 }
 
+.option-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 8px 8px;
+}
+
+.option .option-actions button.discard {
+  width: auto;
+  padding: 6px 12px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.option .option-actions button.discard:hover {
+  color: var(--error);
+  border-color: var(--error);
+}
+
 .option-details {
   padding: 0 16px 12px;
   display: grid;
