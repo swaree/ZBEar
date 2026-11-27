@@ -33,8 +33,6 @@ export function fakeRoutingEngine(tables: {
   itineraryToDestination?: [LatLng, TransitItinerary][];
   /** Itineraries from the Destination to a Parking Candidate, leaving at `leaveDestinationAt`. */
   itineraryFromDestination?: [LatLng, TransitItinerary][];
-  /** Road paths of the drive from the Origin to a Parking Candidate. */
-  drivePathFromOrigin?: [LatLng, LatLng[]][];
   maxPointsPerCall?: number;
 }): RoutingEngine {
   const limit = tables.maxPointsPerCall ?? Infinity;
@@ -61,7 +59,6 @@ export function fakeRoutingEngine(tables: {
   const trafficTo = table(tables.trafficDriveToOrigin);
   const itineraryTo = table(tables.itineraryToDestination);
   const itineraryFrom = table(tables.itineraryFromDestination);
-  const drivePathFrom = table(tables.drivePathFromOrigin);
 
   /** A drive between the Origin and a Parking Candidate, looked up by the candidate in that direction's tables. */
   function traffic(
@@ -129,10 +126,6 @@ export function fakeRoutingEngine(tables: {
       expectPoint("Return itinerary's start", from, tables.destination);
       expectTime("Return itinerary's leave-at time", leaveAt, tables.leaveDestinationAt);
       return itineraryFrom.get(key(to)) ?? null;
-    },
-    async drivePath(from, to) {
-      expectPoint("Drive path's start", from, tables.origin);
-      return drivePathFrom.get(key(to)) ?? null;
     },
   };
 }

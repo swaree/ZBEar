@@ -40,21 +40,19 @@ function ride(line: string, departAt: string, arriveAt: string): TransitItinerar
 }
 
 describe("detailOption", () => {
-  it("gives an Option's transit steps to the Destination and its drive from the Origin", async () => {
+  it("gives an Option's transit steps to the Destination", async () => {
     const steps = ride("R4", "2026-12-01T08:20:00+01:00", "2026-12-01T08:50:00+01:00");
-    const drive = [origin, { lat: 41.5, lng: 2.0 }, parking.location];
     // The fake engine throws when asked about any other place or time.
     const engine = fakeRoutingEngine({
       origin,
       destination,
       arriveBy,
       itineraryToDestination: [[parking.location, steps]],
-      drivePathFromOrigin: [[parking.location, drive]],
     });
 
     const details = await detailOption({ origin, destination, arriveBy }, { candidate: parking }, engine);
 
-    expect(details).toEqual({ transitThere: steps, transitBack: null, driveThere: drive });
+    expect(details).toEqual({ transitThere: steps, transitBack: null });
   });
 
   it("with a return, also gives the transit steps back to the parking, leaving when the stay ends", async () => {
@@ -76,6 +74,6 @@ describe("detailOption", () => {
       engine,
     );
 
-    expect(details).toEqual({ transitThere: there, transitBack: back, driveThere: null });
+    expect(details).toEqual({ transitThere: there, transitBack: back });
   });
 });

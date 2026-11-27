@@ -6,6 +6,7 @@ import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import type { LatLng, ParkingCandidate } from "../domain/types";
 import type { FeatureCollection } from "geojson";
 import type { Zbe } from "../domain/zbe";
+import type { TransitMode } from "../routing/RoutingEngine";
 
 maplibregl.setWorkerUrl(workerUrl);
 
@@ -44,7 +45,7 @@ function hatch([r, g, b]: [number, number, number]): { width: number; height: nu
 
 /** One part of the selected Option's Outbound Leg (the drive, a walk or a ride), drawn in the style of how it is made. */
 export interface OutboundPart {
-  kind: "drive" | "walk" | "ride";
+  mode: "drive" | TransitMode;
   path: LatLng[];
   /** A ride's line colour, as "#rrggbb"; null for the default. */
   color: string | null;
@@ -246,10 +247,16 @@ function showCandidates(m: maplibregl.Map, candidates: ParkingCandidate[]) {
   );
 }
 
+/** How each part is drawn: buses (coaches too) dashed, so they stand apart from rail, metro and tram. */
+function lineStyle(mode: OutboundPart["mode"]): "solid" | "dashed" | "dotted" {
+  if (mode === "walk") return "dotted";
+  return mode === "bus" || mode === "coach" ? "dashed" : "solid";
+}
+
 /**
  * Draws the selected Option's Outbound Leg above the ZBEs and Parking Candidates, beneath the base map's labels:
- * the drive solid, each ride solid in its line's colour, each walk dotted. Each line has a white casing
- * so it stands out from the roads beneath it.
+ * the drive solid, each ride in its line's colour (solid, or dashed for a bus), each walk dotted. The drive
+ * and rides have a white casing so they stand out from the roads beneath them.
  */
 function showOutbound(m: maplibregl.Map, parts: OutboundPart[]) {
   const data: FeatureCollection = {
@@ -259,8 +266,8 @@ function showOutbound(m: maplibregl.Map, parts: OutboundPart[]) {
       .map((part) => ({
         type: "Feature",
         properties: {
-          kind: part.kind,
-          color: part.kind === "ride" ? (part.color ?? RIDE_COLOR) : part.kind === "drive" ? DRIVE_COLOR : WALK_COLOR,
+          style: lineStyle(part.mode),
+          color: part.mode === "drive" ? DRIVE_COLOR : part.mode === "walk" ? WALK_COLOR : (part.color ?? RIDE_COLOR),
         },
         geometry: { type: "LineString", coordinates: part.path.map(toLngLat) },
       })),
@@ -272,15 +279,14 @@ function showOutbound(m: maplibregl.Map, parts: OutboundPart[]) {
   }
   m.addSource(OUTBOUND_SOURCE, { type: "geojson", data });
   const beneath = m.getStyle().layers.find((l) => l.type === "symbol")?.id;
-  const solid: maplibregl.FilterSpecification = ["!=", ["get", "kind"], "walk"];
-  const walk: maplibregl.FilterSpecification = ["==", ["get", "kind"], "walk"];
+  const styled = (style: ReturnType<typeof lineStyle>): maplibregl.FilterSpecification => ["==", ["get", "style"], style];
   const round = { "line-cap": "round", "line-join": "round" } as const;
   m.addLayer(
     {
       id: `${OUTBOUND_SOURCE}-casing`,
       type: "line",
       source: OUTBOUND_SOURCE,
-      filter: solid,
+      filter: ["!=", ["get", "style"], "dotted"],
       layout: round,
       paint: { "line-color": "#ffffff", "line-width": 8 },
     },
@@ -291,9 +297,21 @@ function showOutbound(m: maplibregl.Map, parts: OutboundPart[]) {
       id: `${OUTBOUND_SOURCE}-solid`,
       type: "line",
       source: OUTBOUND_SOURCE,
-      filter: solid,
+      filter: styled("solid"),
       layout: round,
       paint: { "line-color": ["get", "color"], "line-width": 5 },
+    },
+    beneath,
+  );
+  m.addLayer(
+    {
+      id: `${OUTBOUND_SOURCE}-dashed`,
+      type: "line",
+      source: OUTBOUND_SOURCE,
+      filter: styled("dashed"),
+      // Square-ended dashes; the white casing shows through the gaps.
+      layout: { "line-cap": "butt", "line-join": "round" },
+      paint: { "line-color": ["get", "color"], "line-width": 5, "line-dasharray": [2, 1.2] },
     },
     beneath,
   );
@@ -302,7 +320,7 @@ function showOutbound(m: maplibregl.Map, parts: OutboundPart[]) {
       id: `${OUTBOUND_SOURCE}-walk`,
       type: "line",
       source: OUTBOUND_SOURCE,
-      filter: walk,
+      filter: styled("dotted"),
       layout: round,
       paint: { "line-color": ["get", "color"], "line-width": 4, "line-dasharray": [0, 2] },
     },

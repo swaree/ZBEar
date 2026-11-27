@@ -100,7 +100,4 @@ export interface RoutingEngine {
    * way `transitOneToMany` measures it. Null when there is none.
    */
   transitItineraryLeavingAt(from: LatLng, to: LatLng, leaveAt: Date): Promise<TransitItinerary | null>;
-
-  /** The road path of the free-flow drive from `from` to `to`; null when there is no route. */
-  drivePath(from: LatLng, to: LatLng): Promise<LatLng[] | null>;
 }

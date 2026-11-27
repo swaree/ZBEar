@@ -17,7 +17,6 @@ export function transitousEngine(
   | "driveFreeFlowManyToOne"
   | "transitItineraryArrivingBy"
   | "transitItineraryLeavingAt"
-  | "drivePath"
 > {
   const fetchFn = opts.fetch ?? ((...args) => fetch(...args));
 
@@ -55,8 +54,8 @@ export function transitousEngine(
       one: point(one),
       many: points(many),
       mode: "CAR",
-      max: String(MAX_DRIVE_S),
-      maxMatchingDistance: String(MAX_MATCHING_DISTANCE_M),
+      max: String(3 * 3600),
+      maxMatchingDistance: "250",
       arriveBy: String(arriveBy),
     });
     return body.map((d) => d.duration ?? null);
@@ -79,22 +78,7 @@ export function transitousEngine(
     return best && transitItinerary(best);
   }
 
-  /** The free-flow drive from `from` to `to` as a road path: a direct car connection, with no transit. */
-  async function drivePath(from: LatLng, to: LatLng) {
-    const body = await get<PlanResponse>("/api/v6/plan", {
-      fromPlace: place(from),
-      toPlace: place(to),
-      directModes: "CAR",
-      transitModes: "",
-      maxDirectTime: String(MAX_DRIVE_S),
-      maxMatchingDistance: String(MAX_MATCHING_DISTANCE_M),
-    });
-    const legs = body.direct[0]?.legs;
-    return legs ? legs.flatMap((leg) => decodePolyline(leg.legGeometry.points, leg.legGeometry.precision)) : null;
-  }
-
   return {
-    drivePath,
     transitItineraryArrivingBy: (from, to, arriveBy) => itinerary(from, to, arriveBy, true),
     transitItineraryLeavingAt: (from, to, leaveAt) => itinerary(from, to, leaveAt, false),
     transitManyToOne: (many, one, arriveBy) => transit(one, many, arriveBy, true),
@@ -105,10 +89,6 @@ export function transitousEngine(
 }
 
 const BASE_URL = "https://api.transitous.org";
-/** The longest drive routed. */
-const MAX_DRIVE_S = 3 * 3600;
-/** How far from a road a place may be and still be driven to. */
-const MAX_MATCHING_DISTANCE_M = 250;
 /**
  * Walking allowed to the first stop and from the last one. MOTIS defaults to 15 min, which
  * leaves a home with poor transit links (and so the Baseline) with no connection at all.

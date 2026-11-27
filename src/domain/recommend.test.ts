@@ -365,6 +365,20 @@ describe("recommend: traffic pass", () => {
     expect(recommendation.options[0]?.leaveOriginAt).toEqual(new Date("2026-12-01T08:05:00+01:00"));
   });
 
+  it("gives each Option the road path of its drive with traffic: the drive that was checked against the ZBEs", async () => {
+    const c = candidate("c", 41.45, 3);
+    const engine = fakeRoutingEngine({
+      ...trip,
+      driveFromOrigin: [[c.location, min(20)]],
+      transitToDestination: [[c.location, { durationS: min(30), transfers: 0 }]],
+      trafficDriveFromOrigin: [[c.location, trafficDrive(c.location, 22, [41.55, 1.95, 8], [41.5, 1.98, 15])]],
+    });
+
+    const recommendation = await recommend(trip, [c], noZbes, engine);
+
+    expect(recommendation.options[0]?.drivePath).toEqual([origin, { lat: 41.55, lng: 1.95 }, { lat: 41.5, lng: 1.98 }, c.location]);
+  });
+
   it("checks traffic only for the best Parking Candidates by free-flow time, as many as the traffic pass size", async () => {
     const first = candidate("first", 41.41, 3);
     const second = candidate("second", 41.42, 3);

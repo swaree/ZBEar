@@ -11,8 +11,6 @@ import planArriveBy from "./recorded/transitous-plan-arrive-by.json";
 import planWalk from "./recorded/transitous-plan-walk.json";
 import planNone from "./recorded/transitous-plan-none.json";
 import planLeaveAt from "./recorded/transitous-plan-leave-at.json";
-import planCar from "./recorded/transitous-plan-car.json";
-import planCarNone from "./recorded/transitous-plan-car-none.json";
 
 /** Serves one recorded response and remembers the URL that was requested. */
 function recordedFetch(body: unknown) {
@@ -347,35 +345,6 @@ describe("Transitous adapter (recorded responses)", () => {
         "walk",
       ]);
       expect(itinerary!.legs[1]).toMatchObject({ color: "#1eb53a", agency: "TMB", headsign: "Trinitat Nova" });
-    });
-
-    it("asks for the free-flow drive to the parking alone, no transit, and gives its road path", async () => {
-      const { fetchFn, calls } = recordedFetch(planCar);
-      const engine = transitousEngine({ fetch: fetchFn });
-      const origin = { lat: 41.5, lng: 2.0 };
-
-      const path = await engine.drivePath(origin, parking);
-
-      const url = calls[0]!;
-      expect(url.pathname).toBe("/api/v6/plan");
-      expect(url.searchParams.get("fromPlace")).toBe("41.5,2");
-      expect(url.searchParams.get("toPlace")).toBe("41.383003,2.04792");
-      expect(url.searchParams.get("directModes")).toBe("CAR");
-      expect(url.searchParams.get("transitModes")).toBe("");
-      // As long a drive as the free-flow one-to-many allows: the default 30 min would cut off longer ones.
-      expect(url.searchParams.get("maxDirectTime")).toBe("10800");
-      // The recorded 20.8 km drive has 1041 points, from near the Origin to near the parking.
-      expect(path).toHaveLength(1041);
-      // This Origin lies in fields: the drive starts on the nearest road, about 440 m away.
-      expectNear(path![0]!, origin, 1e-2);
-      expectNear(path!.at(-1)!, parking, 5e-4);
-    });
-
-    it("reports no drive as null", async () => {
-      const { fetchFn } = recordedFetch(planCarNone);
-      const engine = transitousEngine({ fetch: fetchFn });
-
-      expect(await engine.drivePath({ lat: 40.5, lng: 5.0 }, parking)).toBeNull();
     });
   });
 

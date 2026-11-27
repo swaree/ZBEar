@@ -1,18 +1,13 @@
 import type { RoutingEngine, TransitItinerary } from "../routing/RoutingEngine";
 import { returnStartsAt } from "./recommend";
-import type { LatLng, Option, TripRequest } from "./types";
+import type { Option, TripRequest } from "./types";
 
-/**
- * What an Option shown to the traveller adds to its times: the transit steps, and the drive's path for
- * the map. Each part is null when it could not be routed.
- */
+/** What an Option shown to the traveller adds to its times: the transit steps, each null when none was found. */
 export interface OptionDetails {
   /** From the parking to the Destination, arriving by the arrive-by time. */
   transitThere: TransitItinerary | null;
   /** Null when the Trip has no return. */
   transitBack: TransitItinerary | null;
-  /** The road path from the Origin to the parking, free-flow. */
-  driveThere: LatLng[] | null;
 }
 
 /**
@@ -26,10 +21,9 @@ export async function detailOption(
 ): Promise<OptionDetails> {
   const parking = option.candidate.location;
   const leaveDestinationAt = returnStartsAt(trip);
-  const [transitThere, transitBack, driveThere] = await Promise.all([
+  const [transitThere, transitBack] = await Promise.all([
     engine.transitItineraryArrivingBy(parking, trip.destination, trip.arriveBy),
     leaveDestinationAt && engine.transitItineraryLeavingAt(trip.destination, parking, leaveDestinationAt),
-    engine.drivePath(trip.origin, parking),
   ]);
-  return { transitThere, transitBack, driveThere };
+  return { transitThere, transitBack };
 }

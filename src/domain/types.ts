@@ -76,6 +76,11 @@ export type TripReturn = { getBackAt: Date } | { stayForS: number };
 export interface Option {
   candidate: ParkingCandidate;
   driveS: number;
+  /**
+   * The road path of the drive from the Origin to the parking: the drive with traffic that was checked
+   * against the ZBEs. Mapbox's terms allow it only within the query, so it is never stored.
+   */
+  drivePath: LatLng[];
   timeToFindSpaceS: number;
   /** Walk to the stop, waiting, riding, transfers and the walk to the Destination. */
   transitS: number;

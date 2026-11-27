@@ -152,6 +152,7 @@ export async function recommend(
     options.push({
       candidate,
       driveS: driveThere.durationS,
+      drivePath: driveThere.path.map(({ lat, lng }) => ({ lat, lng })),
       timeToFindSpaceS: candidate.timeToFindSpaceS,
       transitS: transitThere.durationS,
       transfers: transitThere.transfers,

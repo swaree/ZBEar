@@ -108,10 +108,15 @@ export function App() {
     };
   }, [planned, engine]);
 
+  const selectedOption = planned?.recommendation.options.find((o) => o.candidate.id === selected);
   const selectedDetails = selected ? details.get(selected) : undefined;
+  // The drive is drawn as soon as the Option is selected; its walks and rides join once its details load.
   const outboundParts = useMemo(
-    () => (selectedDetails && !("error" in selectedDetails) ? outboundPartsOf(selectedDetails) : NO_PARTS),
-    [selectedDetails],
+    () =>
+      selectedOption
+        ? outboundPartsOf(selectedOption, selectedDetails && !("error" in selectedDetails) ? selectedDetails : null)
+        : NO_PARTS,
+    [selectedOption, selectedDetails],
   );
 
   const optionCandidates = useMemo(
@@ -349,7 +354,8 @@ export function App() {
         {outboundParts.length > 0 && (
           <p className="outbound-legend hint">
             <span className="legend-drive" aria-hidden="true" /> drive <span className="legend-ride" aria-hidden="true" />{" "}
-            transit, in the line's colour <span className="legend-walk" aria-hidden="true" /> walk
+            train, metro or tram <span className="legend-bus" aria-hidden="true" /> bus{" "}
+            <span className="legend-walk" aria-hidden="true" /> walk. Rides take their line's colour.
           </p>
         )}
       </section>
@@ -530,18 +536,17 @@ function lineBadgeStyle(color: string | null): { background: string; color: stri
   return { background: color, color: luminance > 0.5 ? "#1c1f1e" : "#ffffff" };
 }
 
-/** What the map draws of the selected Option's Outbound Leg: the drive to the parking, then each walk and ride to the Destination. */
-function outboundPartsOf(details: OptionDetails): OutboundPart[] {
-  const parts: OutboundPart[] = [];
-  if (details.driveThere) parts.push({ kind: "drive", path: details.driveThere, color: null });
-  for (const leg of details.transitThere?.legs ?? []) {
-    parts.push(
-      leg.mode === "walk"
-        ? { kind: "walk", path: leg.path, color: null }
-        : { kind: "ride", path: leg.path, color: leg.color },
-    );
-  }
-  return parts;
+/**
+ * What the map draws of an Option's Outbound Leg: the drive to the parking (the one checked against the
+ * ZBEs), then, once its details are in, each walk and ride to the Destination.
+ */
+function outboundPartsOf(option: Option, details: OptionDetails | null): OutboundPart[] {
+  return [
+    { mode: "drive", path: option.drivePath, color: null },
+    ...(details?.transitThere?.legs ?? []).map(
+      (leg): OutboundPart => ({ mode: leg.mode, path: leg.path, color: leg.mode === "walk" ? null : leg.color }),
+    ),
+  ];
 }
 
 function conflictText(conflict: ParkingConflict, arrival: Date): string {

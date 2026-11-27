@@ -387,6 +387,7 @@ a {
 
 .legend-drive,
 .legend-ride,
+.legend-bus,
 .legend-walk {
   display: inline-block;
   width: 18px;
@@ -404,6 +405,10 @@ a {
 
 .legend-ride {
   border-top: 4px solid var(--draw-ride);
+}
+
+.legend-bus {
+  border-top: 4px dashed var(--draw-ride);
 }
 
 .legend-walk {
