@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
+import { detailOption, type OptionDetails } from "../domain/optionDetails";
 import { recommend, returnStartsAt } from "../domain/recommend";
 import type {
   Baseline,
@@ -18,11 +19,11 @@ import { ENVIRONMENTAL_LABELS, type EnvironmentalLabel, type Zbe } from "../doma
 import { loadDiscoveredParkingCandidates } from "../data/parkingCandidates";
 import { loadZbeDataset } from "../data/zbeDataset";
 import { mapboxEngine } from "../routing/mapbox";
-import type { RoutingEngine } from "../routing/RoutingEngine";
+import type { RideMode, RoutingEngine, TransitItinerary } from "../routing/RoutingEngine";
 import { transitousEngine } from "../routing/transitous";
 import { formatDuration } from "./duration";
-import { MapView } from "./MapView";
-import { googleMapsTransitUrl } from "./mapLinks";
+import { MapView, type OutboundPart } from "./MapView";
+import { googleMapsDrivingUrl, googleMapsTransitUrl, wazeNavigationUrl } from "./mapLinks";
 import { readTripReturn, type ReturnForm, type ReturnMode } from "./tripReturn";
 
 /** Operators' timetables (notably Rodalies) only reach a few days ahead. */
@@ -38,6 +39,10 @@ const RETURN_MODES: { mode: ReturnMode; label: string }[] = [
 
 const NO_ZBES: Zbe[] = [];
 const NO_CANDIDATES: ParkingCandidate[] = [];
+const NO_PARTS: OutboundPart[] = [];
+
+/** An Option's details: undefined while they load, then what they are, or why they couldn't be had. */
+type DetailsState = OptionDetails | { error: string } | undefined;
 
 /** Until the personal store (#14) holds vehicle settings, the label is remembered on this device only. */
 const LABEL_STORAGE_KEY = "zbear:vehicle-label";
@@ -54,6 +59,8 @@ export function App() {
   const [returnForm, setReturnForm] = useState<ReturnForm>({ mode: "none", getBackAt: "18:00", stayFor: "" });
   const [planned, setPlanned] = useState<{ trip: TripRequest; recommendation: Recommendation; fitTo: LatLng[] } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // Keyed by Parking Candidate id, for the Options of the planned Trip only.
+  const [details, setDetails] = useState<ReadonlyMap<string, DetailsState>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tapTarget, setTapTarget] = useState<TapTarget>("origin");
@@ -78,6 +85,34 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  // Itineraries are heavy, so they are fetched only for the Options shown, once those are known: one
+  // Option at a time, best first, so the selected one arrives first and Transitous isn't sent a burst.
+  useEffect(() => {
+    if (!planned) return;
+    let cancelled = false;
+    void (async () => {
+      for (const option of planned.recommendation.options) {
+        if (cancelled) return;
+        let result: DetailsState;
+        try {
+          result = await detailOption(planned.trip, option, engine);
+        } catch (err) {
+          result = { error: err instanceof Error ? err.message : String(err) };
+        }
+        if (!cancelled) setDetails((prev) => new Map(prev).set(option.candidate.id, result));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [planned, engine]);
+
+  const selectedDetails = selected ? details.get(selected) : undefined;
+  const outboundParts = useMemo(
+    () => (selectedDetails && !("error" in selectedDetails) ? outboundPartsOf(selectedDetails) : NO_PARTS),
+    [selectedDetails],
+  );
 
   const optionCandidates = useMemo(
     () => planned?.recommendation.options.map((o) => o.candidate) ?? NO_CANDIDATES,
@@ -127,6 +162,7 @@ export function App() {
       const trip: TripRequest = { origin, destination, arriveBy, vehicleLabel, return: tripReturn ?? undefined };
       const recommendation = await recommend(trip, candidates, { zbes }, engine);
       const fitTo = [origin, destination, ...recommendation.options.map((o) => o.candidate.location)];
+      setDetails(new Map());
       setPlanned({ trip, recommendation, fitTo });
       setSelected(recommendation.options[0]?.candidate.id ?? null);
     } catch (err) {
@@ -269,6 +305,7 @@ export function App() {
                   )}
                   <OptionCard
                     option={o}
+                    details={details.get(o.candidate.id)}
                     arrival={planned.trip.arriveBy}
                     selected={o.candidate.id === selected}
                     onSelect={() => setSelected(o.candidate.id)}
@@ -304,10 +341,17 @@ export function App() {
           zbes={zbes ?? NO_ZBES}
           selectedId={selected}
           fitTo={planned?.fitTo ?? null}
+          outbound={outboundParts}
           onTap={onMapTap}
           onOriginMoved={(p) => setOriginText(formatLatLng(p))}
           onDestinationMoved={(p) => setDestinationText(formatLatLng(p))}
         />
+        {outboundParts.length > 0 && (
+          <p className="outbound-legend hint">
+            <span className="legend-drive" aria-hidden="true" /> drive <span className="legend-ride" aria-hidden="true" />{" "}
+            transit, in the line's colour <span className="legend-walk" aria-hidden="true" /> walk
+          </p>
+        )}
       </section>
 
       <footer className="attribution">
@@ -326,19 +370,22 @@ export function App() {
 
 function OptionCard({
   option,
+  details,
   arrival,
   selected,
   onSelect,
 }: {
   option: Option;
+  details: DetailsState;
   arrival: Date;
   selected: boolean;
   onSelect: () => void;
 }) {
   const conflicting = option.parkingConflicts.length > 0;
+  const parking = option.candidate.location;
   return (
     <li className={["option", selected && "selected", conflicting && "conflicting"].filter(Boolean).join(" ")}>
-      <button type="button" onClick={onSelect}>
+      <button type="button" onClick={onSelect} aria-pressed={selected}>
         <div className="option-head">
           <span className="option-name">{option.candidate.name}</span>
           <span className="option-total">
@@ -376,8 +423,125 @@ function OptionCard({
           </p>
         ))}
       </button>
+      <div className="option-details">
+        <p className="navigate">
+          Navigate to the parking:{" "}
+          <a href={googleMapsDrivingUrl(parking)} target="_blank" rel="noopener noreferrer">
+            Google Maps
+          </a>{" "}
+          ·{" "}
+          <a href={wazeNavigationUrl(parking)} target="_blank" rel="noopener noreferrer">
+            Waze
+          </a>
+        </p>
+        {details === undefined ? (
+          <p className="hint">Loading the transit steps…</p>
+        ) : "error" in details ? (
+          <p className="hint">Could not load the transit steps ({details.error}).</p>
+        ) : (
+          <>
+            <TransitSteps
+              title="To the Destination"
+              itinerary={details.transitThere}
+              start="the parking"
+              end="the Destination"
+            />
+            {option.returnLeg && (
+              <TransitSteps title="Back" itinerary={details.transitBack} start="the Destination" end="the parking" />
+            )}
+          </>
+        )}
+      </div>
     </li>
   );
+}
+
+const RIDE_NAMES: Record<RideMode, string> = {
+  bus: "Bus",
+  coach: "Coach",
+  tram: "Tram",
+  subway: "Metro",
+  rail: "Train",
+  ferry: "Ferry",
+  funicular: "Funicular",
+  "aerial-lift": "Cable car",
+  other: "Transit",
+};
+
+/** Walks shorter than this are a change at the same stop, so their distance isn't worth showing. */
+const MIN_SHOWN_WALK_M = 50;
+
+/** An itinerary's walks and rides, one line each; `start` and `end` name its two ends. */
+function TransitSteps({
+  title,
+  itinerary,
+  start,
+  end,
+}: {
+  title: string;
+  itinerary: TransitItinerary | null;
+  start: string;
+  end: string;
+}) {
+  if (!itinerary) return <p className="hint">{title}: no itinerary found.</p>;
+  return (
+    <div className="steps">
+      <div className="steps-title">
+        {title}: {clock(itinerary.departAt)} → {clock(itinerary.arriveAt)}{" "}
+        <span className="hint">({transfers(itinerary.transfers)})</span>
+      </div>
+      <ol>
+        {itinerary.legs.map((leg, i) => {
+          const duration = formatDuration((leg.arriveAt.getTime() - leg.departAt.getTime()) / 1000);
+          if (leg.mode === "walk") {
+            return (
+              <li key={i} className="step step-walk">
+                Walk {duration}
+                {leg.distanceM >= MIN_SHOWN_WALK_M && <> ({Math.round(leg.distanceM / 10) * 10} m)</>} to {leg.toName ?? end}
+              </li>
+            );
+          }
+          const stops = leg.stopsBetween + 1;
+          return (
+            <li key={i} className="step step-ride">
+              <span className="line-badge" style={lineBadgeStyle(leg.color)}>
+                {leg.line || RIDE_NAMES[leg.mode]}
+              </span>{" "}
+              {RIDE_NAMES[leg.mode]}
+              {leg.headsign && <> towards {leg.headsign}</>}: {clock(leg.departAt)} {leg.fromName ?? start} →{" "}
+              {clock(leg.arriveAt)} {leg.toName ?? end}{" "}
+              <span className="hint">
+                ({stops} {stops === 1 ? "stop" : "stops"}, {duration}
+                {leg.agency && <>, {leg.agency}</>})
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+/** A line's badge in its own colour, with whichever of white or near-black text reads better on it. */
+function lineBadgeStyle(color: string | null): { background: string; color: string } | undefined {
+  if (!color) return undefined;
+  const [r = 0, g = 0, b = 0] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16) / 255);
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return { background: color, color: luminance > 0.5 ? "#1c1f1e" : "#ffffff" };
+}
+
+/** What the map draws of the selected Option's Outbound Leg: the drive to the parking, then each walk and ride to the Destination. */
+function outboundPartsOf(details: OptionDetails): OutboundPart[] {
+  const parts: OutboundPart[] = [];
+  if (details.driveThere) parts.push({ kind: "drive", path: details.driveThere, color: null });
+  for (const leg of details.transitThere?.legs ?? []) {
+    parts.push(
+      leg.mode === "walk"
+        ? { kind: "walk", path: leg.path, color: null }
+        : { kind: "ride", path: leg.path, color: leg.color },
+    );
+  }
+  return parts;
 }
 
 function conflictText(conflict: ParkingConflict, arrival: Date): string {

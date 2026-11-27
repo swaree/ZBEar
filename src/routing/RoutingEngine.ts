@@ -23,6 +23,52 @@ export interface TrafficDrive {
   path: TimedPoint[];
 }
 
+/** How a transit itinerary's leg is made: on foot, or riding a line of this kind. */
+export type TransitMode = "walk" | RideMode;
+/** The kinds of transit line a ride can be on: Rodalies and FGC are "rail", the Barcelona metro "subway". */
+export type RideMode = "bus" | "coach" | "tram" | "subway" | "rail" | "ferry" | "funicular" | "aerial-lift" | "other";
+
+interface TransitLegBase {
+  /** Where the leg starts and ends: a stop's name, or null at the itinerary's own ends. */
+  fromName: string | null;
+  toName: string | null;
+  departAt: Date;
+  arriveAt: Date;
+  /** The way the leg goes, from its start to its end. */
+  path: LatLng[];
+}
+
+/** A walk: to the first stop, between stops when changing, or from the last stop. */
+export interface WalkLeg extends TransitLegBase {
+  mode: "walk";
+  distanceM: number;
+}
+
+/** A ride on one transit line, from boarding to alighting. */
+export interface RideLeg extends TransitLegBase {
+  mode: RideMode;
+  /** The line's name as signed, e.g. "L3" or "X43". */
+  line: string;
+  /** Where the vehicle is heading, as signed. */
+  headsign: string | null;
+  /** The line's colour as "#rrggbb", when the operator gives one. */
+  color: string | null;
+  agency: string | null;
+  /** Stops passed between boarding and alighting. */
+  stopsBetween: number;
+}
+
+/** One step of a transit itinerary. */
+export type TransitLeg = WalkLeg | RideLeg;
+
+/** One way to go by transit from one place to another, step by step. */
+export interface TransitItinerary {
+  departAt: Date;
+  arriveAt: Date;
+  transfers: number;
+  legs: TransitLeg[];
+}
+
 /**
  * The routing port the Recommendation depends on (ADR-0002). Results line up
  * with the order of `many`; `null` means no route was found.
@@ -42,4 +88,19 @@ export interface RoutingEngine {
 
   /** Driving from `from` to `to` in the traffic expected when departing at `departAt`. */
   driveWithTraffic(from: LatLng, to: LatLng, departAt: Date): Promise<TrafficDrive | null>;
+
+  /**
+   * The transit itinerary from `from` to `to` that arrives by `arriveBy` and leaves latest, the way
+   * `transitManyToOne` measures it. Null when there is none.
+   */
+  transitItineraryArrivingBy(from: LatLng, to: LatLng, arriveBy: Date): Promise<TransitItinerary | null>;
+
+  /**
+   * The transit itinerary from `from` to `to` that leaves at `leaveAt` or later and arrives first, the
+   * way `transitOneToMany` measures it. Null when there is none.
+   */
+  transitItineraryLeavingAt(from: LatLng, to: LatLng, leaveAt: Date): Promise<TransitItinerary | null>;
+
+  /** The road path of the free-flow drive from `from` to `to`; null when there is no route. */
+  drivePath(from: LatLng, to: LatLng): Promise<LatLng[] | null>;
 }

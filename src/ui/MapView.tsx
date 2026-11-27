@@ -22,6 +22,12 @@ const DISPUTED_HATCH = "zbe-disputed-hatch";
 const CANDIDATE_SOURCE = "parking-candidates";
 /** Matches the light-scheme --candidate in styles.css: the base map is light in both schemes. */
 const CANDIDATE_COLOR = "#0f766e";
+const OUTBOUND_SOURCE = "outbound-leg";
+/** Matches --draw-drive, --draw-ride and --draw-walk in styles.css, for the legend. */
+const DRIVE_COLOR = "#334155";
+/** For a line whose operator gives no colour. */
+const RIDE_COLOR = "#6d28d9";
+const WALK_COLOR = "#1c1f1e";
 
 /** A tile of diagonal stripes in the given colour, for a hatched fill. */
 function hatch([r, g, b]: [number, number, number]): { width: number; height: number; data: Uint8Array } {
@@ -36,6 +42,14 @@ function hatch([r, g, b]: [number, number, number]): { width: number; height: nu
   return { width: size, height: size, data };
 }
 
+/** One part of the selected Option's Outbound Leg (the drive, a walk or a ride), drawn in the style of how it is made. */
+export interface OutboundPart {
+  kind: "drive" | "walk" | "ride";
+  path: LatLng[];
+  /** A ride's line colour, as "#rrggbb"; null for the default. */
+  color: string | null;
+}
+
 export interface MapViewProps {
   origin: LatLng | null;
   destination: LatLng | null;
@@ -47,6 +61,8 @@ export interface MapViewProps {
   selectedId: string | null;
   /** The map fits these points whenever this array changes identity (e.g. after planning a Trip). */
   fitTo: LatLng[] | null;
+  /** The selected Option's Outbound Leg, part by part; empty when there is none to draw. */
+  outbound: OutboundPart[];
   onTap: (point: LatLng) => void;
   onOriginMoved: (point: LatLng) => void;
   onDestinationMoved: (point: LatLng) => void;
@@ -107,6 +123,12 @@ export function MapView(props: MapViewProps) {
     if (!m || !styleReady) return;
     showZbes(m, props.zbes);
   }, [props.zbes, styleReady]);
+
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !styleReady) return;
+    showOutbound(m, props.outbound);
+  }, [props.outbound, styleReady]);
 
   // Effects depend on the coordinates, not the LatLng object, so re-renders with an equal point do nothing.
   useEffect(() => {
@@ -221,6 +243,70 @@ function showCandidates(m: maplibregl.Map, candidates: ParkingCandidate[]) {
       },
     },
     m.getStyle().layers.find((l) => l.type === "symbol")?.id,
+  );
+}
+
+/**
+ * Draws the selected Option's Outbound Leg above the ZBEs and Parking Candidates, beneath the base map's labels:
+ * the drive solid, each ride solid in its line's colour, each walk dotted. Each line has a white casing
+ * so it stands out from the roads beneath it.
+ */
+function showOutbound(m: maplibregl.Map, parts: OutboundPart[]) {
+  const data: FeatureCollection = {
+    type: "FeatureCollection",
+    features: parts
+      .filter((part) => part.path.length >= 2)
+      .map((part) => ({
+        type: "Feature",
+        properties: {
+          kind: part.kind,
+          color: part.kind === "ride" ? (part.color ?? RIDE_COLOR) : part.kind === "drive" ? DRIVE_COLOR : WALK_COLOR,
+        },
+        geometry: { type: "LineString", coordinates: part.path.map(toLngLat) },
+      })),
+  };
+  const source = m.getSource<maplibregl.GeoJSONSource>(OUTBOUND_SOURCE);
+  if (source) {
+    source.setData(data);
+    return;
+  }
+  m.addSource(OUTBOUND_SOURCE, { type: "geojson", data });
+  const beneath = m.getStyle().layers.find((l) => l.type === "symbol")?.id;
+  const solid: maplibregl.FilterSpecification = ["!=", ["get", "kind"], "walk"];
+  const walk: maplibregl.FilterSpecification = ["==", ["get", "kind"], "walk"];
+  const round = { "line-cap": "round", "line-join": "round" } as const;
+  m.addLayer(
+    {
+      id: `${OUTBOUND_SOURCE}-casing`,
+      type: "line",
+      source: OUTBOUND_SOURCE,
+      filter: solid,
+      layout: round,
+      paint: { "line-color": "#ffffff", "line-width": 8 },
+    },
+    beneath,
+  );
+  m.addLayer(
+    {
+      id: `${OUTBOUND_SOURCE}-solid`,
+      type: "line",
+      source: OUTBOUND_SOURCE,
+      filter: solid,
+      layout: round,
+      paint: { "line-color": ["get", "color"], "line-width": 5 },
+    },
+    beneath,
+  );
+  m.addLayer(
+    {
+      id: `${OUTBOUND_SOURCE}-walk`,
+      type: "line",
+      source: OUTBOUND_SOURCE,
+      filter: walk,
+      layout: round,
+      paint: { "line-color": ["get", "color"], "line-width": 4, "line-dasharray": [0, 2] },
+    },
+    beneath,
   );
 }
 

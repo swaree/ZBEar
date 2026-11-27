@@ -1,5 +1,5 @@
 import type { LatLng } from "../domain/types";
-import type { RoutingEngine, TransitDuration } from "./RoutingEngine";
+import type { RideMode, RoutingEngine, TransitDuration, TransitItinerary, TransitLeg } from "./RoutingEngine";
 
 /**
  * Transitous (community MOTIS instance, https://transitous.org). Free, keyless, CORS-open.
@@ -9,7 +9,16 @@ import type { RoutingEngine, TransitDuration } from "./RoutingEngine";
  */
 export function transitousEngine(
   opts: { fetch?: typeof fetch } = {},
-): Pick<RoutingEngine, "transitManyToOne" | "transitOneToMany" | "driveFreeFlowOneToMany" | "driveFreeFlowManyToOne"> {
+): Pick<
+  RoutingEngine,
+  | "transitManyToOne"
+  | "transitOneToMany"
+  | "driveFreeFlowOneToMany"
+  | "driveFreeFlowManyToOne"
+  | "transitItineraryArrivingBy"
+  | "transitItineraryLeavingAt"
+  | "drivePath"
+> {
   const fetchFn = opts.fetch ?? ((...args) => fetch(...args));
 
   async function get<T>(path: string, params: Record<string, string>): Promise<T> {
@@ -46,14 +55,48 @@ export function transitousEngine(
       one: point(one),
       many: points(many),
       mode: "CAR",
-      max: String(3 * 3600),
-      maxMatchingDistance: "250",
+      max: String(MAX_DRIVE_S),
+      maxMatchingDistance: String(MAX_MATCHING_DISTANCE_M),
       arriveBy: String(arriveBy),
     });
     return body.map((d) => d.duration ?? null);
   }
 
+  /** The transit itinerary from `from` to `to` (MOTIS plan endpoint): arriving by `time`, or leaving at it. */
+  async function itinerary(from: LatLng, to: LatLng, time: Date, arriveBy: boolean) {
+    const body = await get<PlanResponse>("/api/v6/plan", {
+      fromPlace: place(from),
+      toPlace: place(to),
+      time: time.toISOString(),
+      arriveBy: String(arriveBy),
+      maxPreTransitTime: String(MAX_WALK_TO_TRANSIT_S),
+      maxPostTransitTime: String(MAX_WALK_TO_TRANSIT_S),
+    });
+    // Walking straight there is reported apart from the transit itineraries, and can be the one to take.
+    const all = [...body.direct, ...body.itineraries];
+    const better = arriveBy ? leavesLater : arrivesSooner;
+    const best = all.reduce<PlanItinerary | null>((a, b) => (!a || better(b, a) ? b : a), null);
+    return best && transitItinerary(best);
+  }
+
+  /** The free-flow drive from `from` to `to` as a road path: a direct car connection, with no transit. */
+  async function drivePath(from: LatLng, to: LatLng) {
+    const body = await get<PlanResponse>("/api/v6/plan", {
+      fromPlace: place(from),
+      toPlace: place(to),
+      directModes: "CAR",
+      transitModes: "",
+      maxDirectTime: String(MAX_DRIVE_S),
+      maxMatchingDistance: String(MAX_MATCHING_DISTANCE_M),
+    });
+    const legs = body.direct[0]?.legs;
+    return legs ? legs.flatMap((leg) => decodePolyline(leg.legGeometry.points, leg.legGeometry.precision)) : null;
+  }
+
   return {
+    drivePath,
+    transitItineraryArrivingBy: (from, to, arriveBy) => itinerary(from, to, arriveBy, true),
+    transitItineraryLeavingAt: (from, to, leaveAt) => itinerary(from, to, leaveAt, false),
     transitManyToOne: (many, one, arriveBy) => transit(one, many, arriveBy, true),
     transitOneToMany: (one, many, leaveAt) => transit(one, many, leaveAt, false),
     driveFreeFlowOneToMany: (one, many) => drive(one, many, false),
@@ -62,6 +105,10 @@ export function transitousEngine(
 }
 
 const BASE_URL = "https://api.transitous.org";
+/** The longest drive routed. */
+const MAX_DRIVE_S = 3 * 3600;
+/** How far from a road a place may be and still be driven to. */
+const MAX_MATCHING_DISTANCE_M = 250;
 /**
  * Walking allowed to the first stop and from the last one. MOTIS defaults to 15 min, which
  * leaves a home with poor transit links (and so the Baseline) with no connection at all.
@@ -75,6 +122,134 @@ interface ParetoEntry {
 }
 
 const point = (p: LatLng) => `${p.lat};${p.lng}`;
+/** The plan endpoint writes a coordinate with a comma, unlike the one-to-many ones. */
+const place = (p: LatLng) => `${p.lat},${p.lng}`;
+
+/** The parts of a MOTIS plan response that the adapter reads. */
+interface PlanResponse {
+  direct: PlanItinerary[];
+  itineraries: PlanItinerary[];
+}
+
+interface PlanItinerary {
+  startTime: string;
+  endTime: string;
+  transfers: number;
+  legs: PlanLeg[];
+}
+
+interface PlanPlace {
+  name: string;
+  lat: number;
+  lon: number;
+  /** "NORMAL" for a coordinate given in the request, which MOTIS names START or END. */
+  vertexType: string;
+}
+
+interface PlanLeg {
+  mode: string;
+  from: PlanPlace;
+  to: PlanPlace;
+  startTime: string;
+  endTime: string;
+  distance?: number;
+  displayName?: string;
+  routeShortName?: string;
+  headsign?: string;
+  routeColor?: string;
+  agencyName?: string;
+  intermediateStops?: unknown[];
+  legGeometry: { points: string; precision: number };
+}
+
+/** Arriving by a time, `a` leaves later than `b`, or as late with fewer transfers. */
+function leavesLater(a: PlanItinerary, b: PlanItinerary): boolean {
+  const byStart = Date.parse(a.startTime) - Date.parse(b.startTime);
+  return byStart > 0 || (byStart === 0 && a.transfers < b.transfers);
+}
+
+/** Leaving at a time, `a` arrives sooner than `b`, or as soon with fewer transfers. */
+function arrivesSooner(a: PlanItinerary, b: PlanItinerary): boolean {
+  const byEnd = Date.parse(a.endTime) - Date.parse(b.endTime);
+  return byEnd < 0 || (byEnd === 0 && a.transfers < b.transfers);
+}
+
+function transitItinerary(itinerary: PlanItinerary): TransitItinerary {
+  return {
+    departAt: new Date(itinerary.startTime),
+    arriveAt: new Date(itinerary.endTime),
+    transfers: itinerary.transfers,
+    legs: itinerary.legs.map(transitLeg),
+  };
+}
+
+function transitLeg(leg: PlanLeg): TransitLeg {
+  const common = {
+    fromName: placeName(leg.from),
+    toName: placeName(leg.to),
+    departAt: new Date(leg.startTime),
+    arriveAt: new Date(leg.endTime),
+    path: decodePolyline(leg.legGeometry.points, leg.legGeometry.precision),
+  };
+  if (leg.mode === "WALK") return { mode: "walk", ...common, distanceM: leg.distance ?? 0 };
+  return {
+    mode: RIDE_MODES[leg.mode] ?? "other",
+    ...common,
+    line: leg.displayName || leg.routeShortName || "",
+    headsign: leg.headsign || null,
+    color: leg.routeColor ? `#${leg.routeColor}` : null,
+    agency: leg.agencyName || null,
+    stopsBetween: leg.intermediateStops?.length ?? 0,
+  };
+}
+
+/** A stop's name; null for the coordinates the request gave, which MOTIS names START and END. */
+const placeName = (p: PlanPlace) => (p.vertexType === "NORMAL" ? null : p.name);
+
+const RIDE_MODES: Record<string, RideMode> = {
+  BUS: "bus",
+  COACH: "coach",
+  TRAM: "tram",
+  SUBWAY: "subway",
+  METRO: "subway",
+  RAIL: "rail",
+  HIGHSPEED_RAIL: "rail",
+  LONG_DISTANCE: "rail",
+  NIGHT_RAIL: "rail",
+  REGIONAL_RAIL: "rail",
+  REGIONAL_FAST_RAIL: "rail",
+  SUBURBAN: "rail",
+  FERRY: "ferry",
+  FUNICULAR: "funicular",
+  AERIAL_LIFT: "aerial-lift",
+  AREAL_LIFT: "aerial-lift",
+};
+
+/** Decodes a Google encoded polyline with `precision` decimal digits (MOTIS uses 6). */
+function decodePolyline(encoded: string, precision: number): LatLng[] {
+  const factor = 10 ** precision;
+  const points: LatLng[] = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const next = () => {
+    let result = 0;
+    let shift = 0;
+    let byte: number;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    return result & 1 ? ~(result >> 1) : result >> 1;
+  };
+  while (index < encoded.length) {
+    lat += next();
+    lng += next();
+    points.push({ lat: lat / factor, lng: lng / factor });
+  }
+  return points;
+}
 const points = (ps: LatLng[]) => ps.map(point).join(",");
 
 function fastest(connections: ParetoEntry[]): TransitDuration | null {

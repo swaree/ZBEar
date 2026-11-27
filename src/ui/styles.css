@@ -12,6 +12,10 @@
   --origin: #334155;
   --destination: #b42318;
   --candidate: #0f766e;
+  /* The Outbound Leg is drawn on the base map, which is light in both schemes, so these stay fixed. */
+  --draw-drive: #334155;
+  --draw-ride: #6d28d9;
+  --draw-walk: #1c1f1e;
   color-scheme: light dark;
 }
 
@@ -170,21 +174,28 @@ a {
   gap: 8px;
 }
 
+/* The card is the list item: its button selects the Option, and its details (links, steps) sit below. */
+.option {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
 .option button {
   width: 100%;
   text-align: left;
   font: inherit;
   color: inherit;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px 16px;
+  background: transparent;
+  border: 0;
+  padding: 12px 16px 8px;
   cursor: pointer;
   display: grid;
   gap: 4px;
 }
 
-.option.selected button {
+.option.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
@@ -193,8 +204,56 @@ a {
   margin-top: 4px;
 }
 
-.option.conflicting button {
+.option.conflicting {
   border-style: dashed;
+}
+
+.option-details {
+  padding: 0 16px 12px;
+  display: grid;
+  gap: 8px;
+  font-size: 0.875rem;
+}
+
+.option-details p {
+  margin: 0;
+}
+
+.navigate a {
+  font-weight: 600;
+}
+
+.steps ol {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.steps-title {
+  font-weight: 600;
+}
+
+.step {
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+}
+
+.step-walk {
+  border-left-style: dotted;
+  color: var(--muted);
+}
+
+.line-badge {
+  display: inline-block;
+  min-width: 2em;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  text-align: center;
+  background: var(--draw-ride);
+  color: #ffffff;
 }
 
 .notice.conflict {
@@ -319,6 +378,36 @@ a {
   opacity: 1;
   width: 18px;
   height: 18px;
+}
+
+/* Swatches matching the map's Outbound Leg lines (DRIVE_COLOR, RIDE_COLOR and WALK_COLOR in MapView). */
+.outbound-legend {
+  margin: 0;
+}
+
+.legend-drive,
+.legend-ride,
+.legend-walk {
+  display: inline-block;
+  width: 18px;
+  vertical-align: middle;
+  margin: 0 4px 0 8px;
+  /* A chip of the base map's colour, so the dark lines read on the dark scheme too. */
+  background: #f2efe9;
+  box-shadow: 0 0 0 3px #f2efe9;
+  border-radius: 1px;
+}
+
+.legend-drive {
+  border-top: 4px solid var(--draw-drive);
+}
+
+.legend-ride {
+  border-top: 4px solid var(--draw-ride);
+}
+
+.legend-walk {
+  border-top: 4px dotted var(--draw-walk);
 }
 
 .attribution {

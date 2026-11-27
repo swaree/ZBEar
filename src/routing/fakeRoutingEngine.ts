@@ -1,6 +1,6 @@
 import { distanceM } from "../domain/geo";
 import type { LatLng } from "../domain/types";
-import type { RoutingEngine, TrafficDrive, TransitDuration } from "./RoutingEngine";
+import type { RoutingEngine, TrafficDrive, TransitDuration, TransitItinerary } from "./RoutingEngine";
 
 /** A drive with traffic as a fixed answer, or as an answer that depends on the departure time. */
 export type FakeTrafficDrive = TrafficDrive | ((departAt: Date) => TrafficDrive | null);
@@ -29,6 +29,12 @@ export function fakeRoutingEngine(tables: {
   transitFromDestination?: [LatLng, TransitDuration][];
   driveToOrigin?: [LatLng, number][];
   trafficDriveToOrigin?: [LatLng, FakeTrafficDrive | null][];
+  /** Itineraries from a Parking Candidate to the Destination, arriving by `arriveBy`. */
+  itineraryToDestination?: [LatLng, TransitItinerary][];
+  /** Itineraries from the Destination to a Parking Candidate, leaving at `leaveDestinationAt`. */
+  itineraryFromDestination?: [LatLng, TransitItinerary][];
+  /** Road paths of the drive from the Origin to a Parking Candidate. */
+  drivePathFromOrigin?: [LatLng, LatLng[]][];
   maxPointsPerCall?: number;
 }): RoutingEngine {
   const limit = tables.maxPointsPerCall ?? Infinity;
@@ -53,6 +59,9 @@ export function fakeRoutingEngine(tables: {
   const driveTo = table(tables.driveToOrigin);
   const trafficFrom = table(tables.trafficDriveFromOrigin);
   const trafficTo = table(tables.trafficDriveToOrigin);
+  const itineraryTo = table(tables.itineraryToDestination);
+  const itineraryFrom = table(tables.itineraryFromDestination);
+  const drivePathFrom = table(tables.drivePathFromOrigin);
 
   /** A drive between the Origin and a Parking Candidate, looked up by the candidate in that direction's tables. */
   function traffic(
@@ -110,6 +119,20 @@ export function fakeRoutingEngine(tables: {
         return traffic(trafficTo, driveTo, from, from, to, departAt);
       }
       throw new Error(`A drive with traffic should start or end at the Origin, not ${key(from)} → ${key(to)}`);
+    },
+    async transitItineraryArrivingBy(from, to, arriveBy) {
+      expectPoint("Outbound itinerary's Destination", to, tables.destination);
+      expectTime("Outbound itinerary's arrive-by time", arriveBy, tables.arriveBy);
+      return itineraryTo.get(key(from)) ?? null;
+    },
+    async transitItineraryLeavingAt(from, to, leaveAt) {
+      expectPoint("Return itinerary's start", from, tables.destination);
+      expectTime("Return itinerary's leave-at time", leaveAt, tables.leaveDestinationAt);
+      return itineraryFrom.get(key(to)) ?? null;
+    },
+    async drivePath(from, to) {
+      expectPoint("Drive path's start", from, tables.origin);
+      return drivePathFrom.get(key(to)) ?? null;
     },
   };
 }
